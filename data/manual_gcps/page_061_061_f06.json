@@ -1,0 +1,107 @@
+{
+  "page_no": 61,
+  "frame_id": "061_f06",
+  "coordinate_mode": {
+    "pdf_origin": "top_left",
+    "y_axis_inverted": false,
+    "mapbox_coordinate_order": "[longitude, latitude]"
+  },
+  "page": {
+    "rect_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "media_box_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "crop_box_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "rotation": 0,
+    "transformation_matrix": "Matrix(1.0, 0.0, 0.0, -1.0, 0.0, 728.5040283203125)"
+  },
+  "frame": {
+    "bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    },
+    "crop_bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    }
+  },
+  "gcps": [
+    {
+      "index": 1,
+      "name": "左上側の道路分岐",
+      "role": "frame_anchor",
+      "pdf_x": 713.267,
+      "pdf_y": 581.189,
+      "raw_pdf_y_top_left": 581.189,
+      "longitude": 133.7926461,
+      "latitude": 34.2140322
+    },
+    {
+      "index": 2,
+      "name": "善通寺の山門・入口付近",
+      "role": "frame_anchor",
+      "pdf_x": 932.258,
+      "pdf_y": 521.31,
+      "raw_pdf_y_top_left": 521.31,
+      "longitude": 133.7774733,
+      "latitude": 34.2268695
+    },
+    {
+      "index": 3,
+      "name": "駅前通り・駅前ロータリー付近",
+      "role": "frame_anchor",
+      "pdf_x": 925.849,
+      "pdf_y": 662.453,
+      "raw_pdf_y_top_left": 662.453,
+      "longitude": 133.7894231,
+      "latitude": 34.2322742
+    },
+    {
+      "index": 4,
+      "name": "右下の県道24号側の主要交差点",
+      "role": "frame_anchor",
+      "pdf_x": 970.715,
+      "pdf_y": 672.076,
+      "raw_pdf_y_top_left": 672.076,
+      "longitude": 133.7882674,
+      "latitude": 34.2350036
+    },
+    {
+      "index": 5,
+      "name": "尽誠学園前",
+      "role": "frame_anchor",
+      "pdf_x": 844.662,
+      "pdf_y": 667.799,
+      "raw_pdf_y_top_left": 667.799,
+      "longitude": 133.7936487,
+      "latitude": 34.2264629
+    },
+    {
+      "index": 6,
+      "name": "左下側の踏切・道路交点",
+      "role": "frame_anchor",
+      "pdf_x": 607.51,
+      "pdf_y": 662.453,
+      "raw_pdf_y_top_left": 662.453,
+      "longitude": 133.8043977,
+      "latitude": 34.2097731
+    }
+  ]
+}

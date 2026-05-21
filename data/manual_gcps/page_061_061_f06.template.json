@@ -1,0 +1,78 @@
+{
+  "page_no": 61,
+  "frame_id": "061_f06",
+  "coordinate_mode": {
+    "pdf_origin": "top_left",
+    "y_axis_inverted": false,
+    "mapbox_coordinate_order": "[longitude, latitude]"
+  },
+  "page": {
+    "rect_pt": {
+      "x0": 0.0,
+      "y0": 0.0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "media_box_pt": {
+      "x0": 0.0,
+      "y0": 0.0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "crop_box_pt": {
+      "x0": 0.0,
+      "y0": 0.0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "rotation": 0,
+    "transformation_matrix": "Matrix(1.0, 0.0, 0.0, -1.0, 0.0, 728.5040283203125)"
+  },
+  "frame": {
+    "bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    },
+    "crop_bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    }
+  },
+  "suggested_frame_anchors": [
+    {
+      "slot": "top_left",
+      "name": "県道24号と県道47号の分岐点",
+      "role": "frame_anchor",
+      "hint": "左上。善通寺南ICの北東側、斜めに分岐する交差点の中心。"
+    },
+    {
+      "slot": "top_right",
+      "name": "75番善通寺 山門付近",
+      "role": "frame_anchor",
+      "hint": "右上。善通寺の寺院マーカー中心か正門前。"
+    },
+    {
+      "slot": "bottom_left",
+      "name": "JR善通寺駅 ロータリー中心",
+      "role": "frame_anchor",
+      "hint": "左下。善通寺ステーションホテルの南、駅前ロータリー中心。"
+    },
+    {
+      "slot": "bottom_right",
+      "name": "県道24号の南東側主要交差点",
+      "role": "frame_anchor",
+      "hint": "右下。『76番金蔵寺へ』注記に近い東西道と南北道の交点。"
+    },
+    {
+      "slot": "center",
+      "name": "善通寺市役所 正面付近",
+      "role": "frame_anchor",
+      "hint": "中央。市役所ラベルの建物中心か入口。"
+    }
+  ],
+  "gcps": []
+}

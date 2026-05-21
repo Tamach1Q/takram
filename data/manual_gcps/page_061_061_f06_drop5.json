@@ -1,0 +1,87 @@
+{
+  "page_no": 61,
+  "frame_id": "061_f06",
+  "coordinate_mode": {
+    "pdf_origin": "top_left",
+    "y_axis_inverted": false,
+    "mapbox_coordinate_order": "[longitude, latitude]"
+  },
+  "page": {
+    "rect_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "media_box_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "crop_box_pt": {
+      "x0": 0,
+      "y0": 0,
+      "x1": 1031.81005859375,
+      "y1": 728.5040283203125
+    },
+    "rotation": 0,
+    "transformation_matrix": "Matrix(1.0, 0.0, 0.0, -1.0, 0.0, 728.5040283203125)"
+  },
+  "frame": {
+    "bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    },
+    "crop_bbox_pt": {
+      "x0": 532.732,
+      "y0": 494.695,
+      "x1": 994.751,
+      "y1": 711.514
+    }
+  },
+  "gcps": [
+    {
+      "index": 1,
+      "name": "道路分岐",
+      "role": "frame_anchor",
+      "pdf_x": 708.994,
+      "pdf_y": 583.327,
+      "raw_pdf_y_top_left": 583.327,
+      "longitude": 133.7930077,
+      "latitude": 34.2139299
+    },
+    {
+      "index": 2,
+      "name": "善通寺の山門・入口付近",
+      "role": "frame_anchor",
+      "pdf_x": 931.863,
+      "pdf_y": 525.473,
+      "raw_pdf_y_top_left": 525.473,
+      "longitude": 133.777765,
+      "latitude": 34.2269939
+    },
+    {
+      "index": 3,
+      "name": "駅前通り・駅前ロータリー付近",
+      "role": "frame_anchor",
+      "pdf_x": 917.303,
+      "pdf_y": 641.068,
+      "raw_pdf_y_top_left": 641.068,
+      "longitude": 133.7877713,
+      "latitude": 34.2306894
+    },
+    {
+      "index": 4,
+      "name": "右下の県道24号側の主要交差点",
+      "role": "frame_anchor",
+      "pdf_x": 960.033,
+      "pdf_y": 668.869,
+      "raw_pdf_y_top_left": 668.869,
+      "longitude": 133.7879167,
+      "latitude": 34.2347409
+    }
+  ]
+}

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="/images/favicon.ico">
+<title>四国別格二十霊場 お遍路地図 四国八十八箇所 お遍路ポータル</title>
+<link href="/css/bootstrap.css" rel="stylesheet">
+<link href="/css/style5.css" rel="stylesheet">
+<link href="/css/font-awesome.min.css" rel="stylesheet">
+<script src="/js/jquery-3.7.1.min.js"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-JCGWSJF2BZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-JCGWSJF2BZ');
+</script>
+</head>
+<body>
+
+
+<div class="navbar navbar-default" role="navigation">
+    <div class="container">
+    
+        <div class="navbar-header">
+        <a class="navbar-brand" href="/"><img src="/images/logo.png" width="161" height="50" alt="お遍路ポータル"></a>
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+        <span class="sr-only">メインメニュー</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        </button>
+        </div>
+        
+        <div class="navbar-collapse collapse">
+        <ul class="nav navbar-nav">
+        <li ><a href="/"><i class="glyphicon glyphicon-home"></i> Home</a></li>
+        <li class="dropdown active">
+        <a href="#" class="dropdown-toggle" data-toggle="dropdown">霊場情報 <i class="caret"></i></a>
+        <ul class="dropdown-menu">
+        <li><a href="/tokushima/">徳島県</a></li>
+        <li><a href="/kochi/">高知県</a></li>
+        <li><a href="/ehime/">愛媛県</a></li>
+        <li><a href="/kagawa/">香川県</a></li>
+        <li><a href="/bekkaku/">別格二十霊場情報</a></li>
+        <li><a href="/map/">お遍路地図</a></li>
+        <li><a href="/map_b/">四国別格二十霊場地図</a></li>
+        
+        
+        </ul>
+        </li>
+        <li>
+        <a href="#" class="dropdown-toggle" data-toggle="dropdown">お遍路道中記 <i class="caret"></i></a>
+        <ul class="dropdown-menu">
+        <li><a href="/doucyu/" ><i class="fa fa-picture-o"></i> お遍路道中記</a></li>
+        <li><a href="/kechigan/" ><i class="fa fa-smile-o"></i> 結願</a></li>
+        </ul>
+        </li>
+        <li><a href="/noukyou/"><i class="fa fa-book"></i> みんなの納経帳</a></li>
+        </ul>
+        
+        <ul class="pc_menu nav navbar-nav navbar-right">
+            <li><a href="/regist_ohenro/" title="お遍路さん登録を行います"><i class="glyphicon glyphicon-heart"></i> 新規登録</a></li>
+            <li><a href="#login_area" role="button" data-toggle="modal"><i class="glyphicon glyphicon-user"></i> ログイン</a></li>
+        </ul>       
+        
+        </div>
+        
+    </div>
+</div>
+
+
+
+<div class="container">
+
+
+
+
+<div class="sp_menu btn-group btn-group-justified">    
+<a href="/regist_ohenro/" class="btn btn-default"><i class="glyphicon glyphicon-heart"></i> お遍路さん登録</a>
+<a href="#login_area" role="button" data-toggle="modal" class="btn btn-default"><i class="glyphicon glyphicon-user"></i> ログイン</a>    
+</div>
+
+
+
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDnCBdOjRCUf-fguyL3uPcZO_iLVwjKu8k&callback=initMap" async defer></script>
+<script>
+      // マップの初期化
+      function initMap() {
+        var mapCenter = {lat: 33.751159, lng: 133.636658}; // 中心の座標
+        var map = new google.maps.Map(document.getElementById('map'), {
+          zoom: 8,
+          center: mapCenter
+        });
+
+        // 吹き出し（InfoWindow）のインスタンス
+        var infoWindow = new google.maps.InfoWindow();
+
+        // マーカーの位置とコンテンツ
+        var locations = [
+
+{lat:34.159535, lng:134.399901, content:'<h3>仏王山 大山寺</h3><p>1番札所 <a href ="/bekkaku/1/">仏王山 大山寺</a>にアクセスする</p>'},
+{lat:34.058578, lng:134.427703, content:'<h3>東明山 童学寺</h3><p>2番札所 <a href ="/bekkaku/2/">東明山 童学寺</a>にアクセスする</p>'},
+{lat:33.940198, lng:134.430755, content:'<h3>月頂山 慈眼寺</h3><p>3番札所 <a href ="/bekkaku/3/">月頂山 慈眼寺</a>にアクセスする</p>'},
+{lat:33.647801, lng:134.385138, content:'<h3>八坂山 八坂寺</h3><p>4番札所 <a href ="/bekkaku/4/">八坂山 八坂寺</a>にアクセスする</p>'},
+{lat:33.388292, lng:133.281423, content:'<h3>高野山 大善寺</h3><p>5番札所 <a href ="/bekkaku/5/">高野山 大善寺</a>にアクセスする</p>'},
+{lat:33.224949, lng:132.569157, content:'<h3>臨海山 福寿寺</h3><p>6番札所 <a href ="/bekkaku/6/">臨海山 福寿寺</a>にアクセスする</p>'},
+{lat:33.535725, lng:132.46554, content:'<h3>金山 出石寺</h3><p>7番札所 <a href ="/bekkaku/7/">金山 出石寺</a>にアクセスする</p>'},
+{lat:33.523329, lng:132.581822, content:'<h3>正法山 永徳寺</h3><p>8番札所 <a href ="/bekkaku/8/">正法山 永徳寺</a>にアクセスする</p>'},
+{lat:33.76452, lng:132.810674, content:'<h3>大法山 文珠院徳盛寺</h3><p>9番札所 <a href ="/bekkaku/9/">大法山 文珠院徳盛寺</a>にアクセスする</p>'},
+{lat:33.905686, lng:133.025334, content:'<h3>仏法山 興隆寺</h3><p>10番札所 <a href ="/bekkaku/10/">仏法山 興隆寺</a>にアクセスする</p>'},
+{lat:33.902448, lng:133.055687, content:'<h3>生木山 正善寺</h3><p>11番札所 <a href ="/bekkaku/11/">生木山 正善寺</a>にアクセスする</p>'},
+{lat:33.956416, lng:133.420383, content:'<h3>摩尼山 延命寺</h3><p>12番札所 <a href ="/bekkaku/12/">摩尼山 延命寺</a>にアクセスする</p>'},
+{lat:33.950686, lng:133.606245, content:'<h3>金光山 仙龍寺</h3><p>13番札所 <a href ="/bekkaku/13/">金光山 仙龍寺</a>にアクセスする</p>'},
+{lat:33.989779, lng:133.635091, content:'<h3>邦治山 常福寺</h3><p>14番札所 <a href ="/bekkaku/14/">邦治山 常福寺</a>にアクセスする</p>'},
+{lat:34.047836, lng:133.840984, content:'<h3>宝珠山 箸蔵寺</h3><p>15番札所 <a href ="/bekkaku/15/">宝珠山 箸蔵寺</a>にアクセスする</p>'},
+{lat:34.071151, lng:133.688385, content:'<h3>巨鼇山 萩原寺</h3><p>16番札所 <a href ="/bekkaku/16/">巨鼇山 萩原寺</a>にアクセスする</p>'},
+{lat:34.1638353, lng:133.86446449999994, content:'<h3>五穀山 神野寺</h3><p>17番札所 <a href ="/bekkaku/17/">五穀山 神野寺</a>にアクセスする</p>'},
+{lat:34.256392, lng:133.728172, content:'<h3>経納山 海岸寺</h3><p>18番札所 <a href ="/bekkaku/18/">経納山 海岸寺</a>にアクセスする</p>'},
+{lat:34.347369, lng:133.994064, content:'<h3>寶幢山 香西寺</h3><p>19番札所 <a href ="/bekkaku/19/">寶幢山 香西寺</a>にアクセスする</p>'},
+{lat:34.121895, lng:134.127145, content:'<h3>福大山 大瀧寺</h3><p>20番札所 <a href ="/bekkaku/20/">福大山 大瀧寺</a>にアクセスする</p>'}
+
+        ];
+
+        // 各マーカーを作成し、クリックイベントを追加
+        for (var i = 0; i < locations.length; i++) {
+          (function(location, index) {
+            var marker = new google.maps.Marker({
+              position: {lat: location.lat, lng: location.lng},
+              map: map,
+              label: (index + 1).toString() // マーカーに数字を表示
+            });
+
+            // マーカークリック時にInfoWindowを表示
+            marker.addListener('click', function() {
+              infoWindow.setContent(location.content); // 吹き出しの内容を設定
+              infoWindow.open(map, marker); // 吹き出しを開く
+            });
+          })(locations[i], i);
+        }
+      }
+    </script>
+
+<ul class="breadcrumb">
+      <li><a href="/">Home</a></li>
+      <li class="active">四国別格二十霊場 お遍路地図</li>
+</ul>
+        
+        
+<h1>四国別格二十霊場 お遍路地図</h1>
+<p>この地図は、四国別格二十霊場の地図です。<br />
+赤のピンをクリックすると、寺名が表示されます。寺名をクリックで寺情報が見れます。</p>
+
+<div id="map" style="height: 500px; width: 100%;"></div>
+
+<br />
+
+<table border="0" cellpadding="0" cellspacing="0"><tr><td><div style="border:1px solid #95a5a6;border-radius:.75rem;background-color:#FFFFFF;width:504px;margin:0px;padding:5px;text-align:center;overflow:hidden;"><table><tr><td style="width:240px"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F16238049%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><img src="https://hbb.afl.rakuten.co.jp/hgb/19f653b4.50e6249a.19f653b5.81eb41e2/?me_id=1213310&item_id=19943084&pc=https%3A%2F%2Fthumbnail.image.rakuten.co.jp%2F%400_mall%2Fbook%2Fcabinet%2F3266%2F9784780423266.jpg%3F_ex%3D240x240&s=240x240&t=picttext" border="0" style="margin:2px" alt="[商品価格に関しましては、リンクが作成された時点と現時点で情報が変更されている場合がございます。]" title="[商品価格に関しましては、リンクが作成された時点と現時点で情報が変更されている場合がございます。]"></a></td><td style="vertical-align:top;width:248px;display: block;"><p style="font-size:12px;line-height:1.4em;text-align:left;margin:0px;padding:2px 6px;word-wrap:break-word"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F16238049%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;">四国別格二十霊場 札所めぐりルートガイド ～八十八ヶ所と共に巡るお遍路～ 改訂版 [ NPO四国路おへんろ倶楽部 ]</a><br><span >価格：1,980円（税込、送料無料)</span> <span style="color:#BBB">(2024/10/20時点)</span></p><div style="margin:10px;"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F16238049%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><img src="https://static.affiliate.rakuten.co.jp/makelink/rl.svg" style="float:left;max-height:27px;width:auto;margin-top:0" ></a><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F16238049%2F%3Fscid%3Daf_pc_bbtn&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ==" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><div style="float:right;width:41%;height:27px;background-color:#bf0000;color:#fff!important;font-size:12px;font-weight:500;line-height:27px;margin-left:1px;padding: 0 12px;border-radius:16px;cursor:pointer;text-align:center;"> 楽天で購入 </div></a></div></td></tr></table></div><br><p style="color:#000000;font-size:12px;line-height:1.4em;margin:5px;word-wrap:break-word"></p></td></tr></table>
+
+<table border="0" cellpadding="0" cellspacing="0"><tr><td><div style="border:1px solid #95a5a6;border-radius:.75rem;background-color:#FFFFFF;width:504px;margin:0px;padding:5px;text-align:center;overflow:hidden;"><table><tr><td style="width:240px"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F14423437%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><img src="https://hbb.afl.rakuten.co.jp/hgb/19f653b4.50e6249a.19f653b5.81eb41e2/?me_id=1213310&item_id=18171629&pc=https%3A%2F%2Fthumbnail.image.rakuten.co.jp%2F%400_mall%2Fbook%2Fcabinet%2F7869%2F9784780417869.jpg%3F_ex%3D240x240&s=240x240&t=picttext" border="0" style="margin:2px" alt="[商品価格に関しましては、リンクが作成された時点と現時点で情報が変更されている場合がございます。]" title="[商品価格に関しましては、リンクが作成された時点と現時点で情報が変更されている場合がございます。]"></a></td><td style="vertical-align:top;width:248px;display: block;"><p style="font-size:12px;line-height:1.4em;text-align:left;margin:0px;padding:2px 6px;word-wrap:break-word"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F14423437%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;">クルマでお遍路 四国八十八ヶ所札所めぐり ドライブ巡礼ガイド [ 四国おへんろ倶楽部 ]</a><br><span >価格：1,815円（税込、送料無料)</span> <span style="color:#BBB">(2024/10/20時点)</span></p><div style="margin:10px;"><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F14423437%2F&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ%3D%3D" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><img src="https://static.affiliate.rakuten.co.jp/makelink/rl.svg" style="float:left;max-height:27px;width:auto;margin-top:0" ></a><a href="https://hb.afl.rakuten.co.jp/ichiba/19f653b4.50e6249a.19f653b5.81eb41e2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbook%2F14423437%2F%3Fscid%3Daf_pc_bbtn&link_type=picttext&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJwaWN0dGV4dCIsInNpemUiOiIyNDB4MjQwIiwibmFtIjoxLCJuYW1wIjoicmlnaHQiLCJjb20iOjEsImNvbXAiOiJkb3duIiwicHJpY2UiOjEsImJvciI6MSwiY29sIjoxLCJiYnRuIjoxLCJwcm9kIjowLCJhbXAiOmZhbHNlfQ==" target="_blank" rel="nofollow sponsored noopener" style="word-wrap:break-word;"><div style="float:right;width:41%;height:27px;background-color:#bf0000;color:#fff!important;font-size:12px;font-weight:500;line-height:27px;margin-left:1px;padding: 0 12px;border-radius:16px;cursor:pointer;text-align:center;"> 楽天で購入 </div></a></div></td></tr></table></div><br><p style="color:#000000;font-size:12px;line-height:1.4em;margin:5px;word-wrap:break-word"></p></td></tr></table>
+
+
+
+
+</div> <!-- /container -->
+
+<div id="login_area" class="modal fade">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button><!-- closeボタン -->
+                <h4 class="modal-title">お遍路さんログイン</h4>
+            </div>
+            <div class="modal-body">
+                <p>登録済みのお遍路さんはログイン出来ます。</p>
+                
+                <fieldset>
+                <legend>メールアドレスでログイン</legend>               
+                <form method="post" action="/user_login/login.php">
+                	<input type="hidden" name="recaptchaResponse" id="recaptchaResponse">
+
+                <div class="form-group">
+                  <input class="form-control" id="focusedInput" name="mail" placeholder="メールアドレス" type="text">
+                  <input class="form-control" id="focusedInput" name="pass" placeholder="パスワード" type="password">
+                </div>
+                <button type="submit" class="btn btn-primary">ログイン</button>
+                </form>
+
+                </fieldset>
+                <br>
+                
+                <fieldset>
+                <legend>Yahoo IDを使ってログイン</legend>
+
+                <a href="/user_login/yahoo/login.php"><img src="/images/btnSYid.gif" /></a>
+
+                </fieldset>
+                <br>
+          
+                <fieldset>
+                <legend>パスワードを忘れた</legend>               
+                <a href="/user_login/forget/" class="btn btn-danger"><i class="fa fa-key"></i> パスワード再発行</a>
+                </fieldset>
+
+                
+            </div>
+            <div class="modal-footer">
+            
+            <p>お遍路登録はこちらから簡単に出来ます</p>
+            <a href="/regist_ohenro/" class="btn btn-primary"><i class="fa fa-arrow-circle-right"></i> お遍路さん登録</a>
+
+            </div>
+        </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+</div><!-- /未ログイン時に表示するModal -->
+
+<footer>
+    <div class="container">
+
+        <ul class="share-buttons">
+            <li><a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fwww.ohenro-portal.jp%2F" target="_blank"><img src="/images/Facebook.png"></a></li>
+            <li><a href="https://twitter.com/intent/tweet?source=https%3A%2F%2Fwww.ohenro-portal.jp%2F&text=%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB: https%3A%2F%2Fwww.ohenro-portal.jp%2F&via=88portal" target="_blank" title="Tweet"><img src="/images/Twitter.png"></a></li>
+            <li><a href="http://pinterest.com/pin/create/button/?url=https%3A%2F%2Fwww.ohenro-portal.jp%2F&description=%E3%81%8A%E9%81%8D%E8%B7%AF%E6%83%85%E5%A0%B1%E5%B0%82%E9%96%80%E3%82%B5%E3%82%A4%E3%83%88%E3%80%82%E5%9B%9B%E5%9B%BD%E5%85%AB%E5%8D%81%E5%85%AB%E7%AE%87%E6%89%80%20%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB%E3%81%A7%E3%81%AF%E3%80%81%E3%81%8A%E9%81%8D%E8%B7%AF%E6%9C%AD%E6%89%80%E6%83%85%E5%A0%B1%E3%83%BB%E5%9C%B0%E5%9B%B3%E6%83%85%E5%A0%B1%E3%83%BB%E3%81%BF%E3%82%93%E3%81%AA%E3%81%AE%E7%B4%8D%E7%B5%8C%E5%B8%B3%E3%83%BB%E3%81%8A%E9%81%8D%E8%B7%AF%E9%81%93%E4%B8%AD%E8%A8%98%E3%83%BB%E6%83%85%E5%A0%B1%E4%BA%A4%E6%8F%9B%E3%81%AE%E5%BA%83%E5%A0%B4%E3%82%92%E8%A8%AD%E7%BD%AE%E3%80%82%E5%9B%9B%E5%9B%BD%E5%88%A5%E6%A0%BC%EF%BC%92%EF%BC%90%E9%9C%8A%E5%A0%B4%E3%81%AE%E6%83%85%E5%A0%B1%E3%82%82%E6%8E%B2%E8%BC%89%E3%81%97%E3%81%A6%E3%81%84%E3%81%BE%E3%81%99%E3%80%82" target="_blank" title="Pin it"><img src="/images/Pinterest.png"></a></li>
+            <li><a href="https://getpocket.com/save?url=https%3A%2F%2Fwww.ohenro-portal.jp%2F&title=%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB" target="_blank" title="Add to Pocket"><img src="/images/Pocket.png"></a></li>
+            <li><a href="http://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fwww.ohenro-portal.jp%2F&title=%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB&summary=%E3%81%8A%E9%81%8D%E8%B7%AF%E6%83%85%E5%A0%B1%E5%B0%82%E9%96%80%E3%82%B5%E3%82%A4%E3%83%88%E3%80%82%E5%9B%9B%E5%9B%BD%E5%85%AB%E5%8D%81%E5%85%AB%E7%AE%87%E6%89%80%20%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB%E3%81%A7%E3%81%AF%E3%80%81%E3%81%8A%E9%81%8D%E8%B7%AF%E6%9C%AD%E6%89%80%E6%83%85%E5%A0%B1%E3%83%BB%E5%9C%B0%E5%9B%B3%E6%83%85%E5%A0%B1%E3%83%BB%E3%81%BF%E3%82%93%E3%81%AA%E3%81%AE%E7%B4%8D%E7%B5%8C%E5%B8%B3%E3%83%BB%E3%81%8A%E9%81%8D%E8%B7%AF%E9%81%93%E4%B8%AD%E8%A8%98%E3%83%BB%E6%83%85%E5%A0%B1%E4%BA%A4%E6%8F%9B%E3%81%AE%E5%BA%83%E5%A0%B4%E3%82%92%E8%A8%AD%E7%BD%AE%E3%80%82%E5%9B%9B%E5%9B%BD%E5%88%A5%E6%A0%BC%EF%BC%92%EF%BC%90%E9%9C%8A%E5%A0%B4%E3%81%AE%E6%83%85%E5%A0%B1%E3%82%82%E6%8E%B2%E8%BC%89%E3%81%97%E3%81%A6%E3%81%84%E3%81%BE%E3%81%99%E3%80%82&source=https%3A%2F%2Fwww.ohenro-portal.jp%2F" target="_blank" title="Share on LinkedIn"><img src="/images/LinkedIn.png"></a></li>
+            <li><a href="mailto:?subject=%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB&body=%E3%81%8A%E9%81%8D%E8%B7%AF%E6%83%85%E5%A0%B1%E5%B0%82%E9%96%80%E3%82%B5%E3%82%A4%E3%83%88%E3%80%82%E5%9B%9B%E5%9B%BD%E5%85%AB%E5%8D%81%E5%85%AB%E7%AE%87%E6%89%80%20%E3%81%8A%E9%81%8D%E8%B7%AF%E3%83%9D%E3%83%BC%E3%82%BF%E3%83%AB%E3%81%A7%E3%81%AF%E3%80%81%E3%81%8A%E9%81%8D%E8%B7%AF%E6%9C%AD%E6%89%80%E6%83%85%E5%A0%B1%E3%83%BB%E5%9C%B0%E5%9B%B3%E6%83%85%E5%A0%B1%E3%83%BB%E3%81%BF%E3%82%93%E3%81%AA%E3%81%AE%E7%B4%8D%E7%B5%8C%E5%B8%B3%E3%83%BB%E3%81%8A%E9%81%8D%E8%B7%AF%E9%81%93%E4%B8%AD%E8%A8%98%E3%83%BB%E6%83%85%E5%A0%B1%E4%BA%A4%E6%8F%9B%E3%81%AE%E5%BA%83%E5%A0%B4%E3%82%92%E8%A8%AD%E7%BD%AE%E3%80%82%E5%9B%9B%E5%9B%BD%E5%88%A5%E6%A0%BC%EF%BC%92%EF%BC%90%E9%9C%8A%E5%A0%B4%E3%81%AE%E6%83%85%E5%A0%B1%E3%82%82%E6%8E%B2%E8%BC%89%E3%81%97%E3%81%A6%E3%81%84%E3%81%BE%E3%81%99%E3%80%82: https%3A%2F%2Fwww.ohenro-portal.jp%2F" target="_blank" title="Email"><img src="/images/Email.png"></a></li>
+        </ul>
+
+
+        <div class="row">
+
+                <div class="col-xs-6 col-sm-3">
+                    <p>About us</p>
+                    <ul class="ft_list">
+                        <li><a href="/"><i class="glyphicon glyphicon-home"></i>トップページ</a></li>
+                        <li><a href="/about/"><i class="fa fa-info-circle"></i> お遍路ポータルとは</a></li>
+                        <li><a href="/help/"><i class="fa fa-question-circle"></i> よくある質問</a></li>
+                        <li><a href="/kitei/"><i class="fa fa-exclamation-triangle"></i> 利用規約</a></li>
+                        <li><a href="/privacy/"><i class="fa fa-eye"></i> プライバシーポリシー</a></li>
+                        <li><a href="/sitemap/"><i class="fa fa-sitemap"></i> サイトマップ</a></li>
+                        <li><a href="/contact/"><i class="fa fa-envelope"></i> お問い合わせ</a></li>
+                    </ul>
+                </div>    
+                
+    
+                <div class="col-xs-6 col-sm-3">
+                    <p>Contents</p>
+                    <ul class="ft_list">
+                        <li><a href="/fudasyo/"><i class="fa fa-home"></i> 札所情報</a></li>
+                        <li><a href="/map/"><i class="fa fa-map-marker"></i> お遍路地図</a></li>
+                        <li><a href="/map_b/"><i class="fa fa-map-marker"></i> 四国別格二十霊場地図</a></li>
+                        <li><a href="/kokoroe/"><i class="fa fa-hand-o-right"></i> 初めてのお遍路さん</a></li>
+                        <li><a href="/youhin/"><i class="fa fa-shopping-cart"></i> お遍路用品紹介</a></li>
+                    </ul>
+                </div>    
+                
+                
+                <div class="col-xs-6 col-sm-3">
+                    <p>Service</p>
+                    <ul class="ft_list">
+                        <li><a href="/doucyu/"><i class="fa fa-picture-o"></i> お遍路道中記</a></li>
+                        <li><a href="/noukyou/"><i class="fa fa-book"></i> みんなの納経帳</a></li>
+                        <li><a href="/regist_ohenro/"><i class="glyphicon glyphicon-heart"></i> お遍路さん登録</a></li>
+                        <li><a href="/user_login/"><i class="glyphicon glyphicon-user"></i> お遍路さんログイン</a></li>
+
+
+<script src="https://www.google.com/recaptcha/api.js?render=6LcNrN4UAAAAAKrs09E9Yk4dVZ9nviR5due_k6xC"></script>
+<script>
+grecaptcha.ready(function () {
+    grecaptcha.execute('6LcNrN4UAAAAAKrs09E9Yk4dVZ9nviR5due_k6xC', {action: 'homepage'}).then(function(token) {
+        var recaptchaResponse = document.getElementById('recaptchaResponse');
+        recaptchaResponse.value = token;
+    });
+});
+</script>
+
+
+					</ul>
+                </div>    
+                
+                <div id="qr">
+                    <div class="col-xs-6 col-sm-3">
+                        <p><i class="fa fa-mobile"></i> Smart Phone</p>
+                        <img src="/images/ft_qr.gif" alt="スマートフォンサイトQRコード" />
+                    </div>
+                </div>
+            
+            
+            </div> <!-- col-xs-x col-sm-x"-->  
+                
+    
+        </div><!-- /row -->
+        
+
+
+</footer>
+
+<address>Copyright &copy; 2026 お遍路ポータル ALL RIGHTS RESERVED<img src="/cgi-bin/count/dayx.cgi?gif" alt="" /></address>
+
+<script src="/js/bootstrap.min.js"></script>
+<script src="/js/jquery.scrollUp.min.js"></script>
+<script src="/js/common5.js"></script>
+
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-118019087-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-118019087-1');
+</script>
+
+</body>
+</html>
