@@ -31,6 +31,7 @@ class GCP:
     confidence: float
     needs_manual_review: bool
     page_height_pt: float
+    source: str
 
 
 @dataclass
@@ -48,6 +49,8 @@ class TransformModel:
     params: Any
     gcp_ids: list[str]
     gcp_count: int
+    manual_count: int
+    auto_count: int
     gcp_mean_confidence: float
     rmse_m: float
     loocv_rmse_m: float | None
@@ -101,6 +104,7 @@ def load_gcps(path: Path, page_heights: dict[int, float]) -> list[GCP]:
                     confidence=float(row["confidence"]),
                     needs_manual_review=row["needs_manual_review"] == "True",
                     page_height_pt=float(page_height_pt),
+                    source=row.get("source", "auto"),
                 )
             )
     return rows
@@ -272,6 +276,13 @@ def model_quality_status(gcp_count: int, loocv_rmse_m: float | None) -> str:
     return "fail"
 
 
+def gcps_for_scope(scope_gcps: list[GCP], scope_type: str) -> list[GCP]:
+    manual_gcps = [gcp for gcp in scope_gcps if gcp.source == "manual"]
+    if scope_type == "frame" and manual_gcps:
+        return manual_gcps
+    return scope_gcps
+
+
 def fit_candidate_model(
     gcps: list[GCP],
     scope_type: str,
@@ -283,12 +294,13 @@ def fit_candidate_model(
     crs_candidate: str,
 ) -> TransformModel | None:
     min_points, fit_fn, apply_fn = MODEL_SPECS[model_name]
-    if len(gcps) < min_points:
+    used_gcps = gcps_for_scope(gcps, scope_type)
+    if len(used_gcps) < min_points:
         return None
-    source = source_points(gcps, y_mode)
-    ref_lon = sum(gcp.longitude for gcp in gcps) / len(gcps)
-    ref_lat = sum(gcp.latitude for gcp in gcps) / len(gcps)
-    target = target_xy(gcps, crs_candidate, ref_lon, ref_lat)
+    source = source_points(used_gcps, y_mode)
+    ref_lon = sum(gcp.longitude for gcp in used_gcps) / len(used_gcps)
+    ref_lat = sum(gcp.latitude for gcp in used_gcps) / len(used_gcps)
+    target = target_xy(used_gcps, crs_candidate, ref_lon, ref_lat)
     try:
         params = fit_fn(source, target)
         fitted = apply_fn(source, params)
@@ -297,9 +309,9 @@ def fit_candidate_model(
     rmse = rms_errors(fitted, target)
 
     loocv_errors: list[float] = []
-    if len(gcps) > min_points:
-        for index in range(len(gcps)):
-            train_idx = [i for i in range(len(gcps)) if i != index]
+    if len(used_gcps) > min_points:
+        for index in range(len(used_gcps)):
+            train_idx = [i for i in range(len(used_gcps)) if i != index]
             train_source = source[train_idx]
             train_target = target[train_idx]
             try:
@@ -309,7 +321,9 @@ def fit_candidate_model(
                 continue
             loocv_errors.append(float(np.linalg.norm(predicted[0] - target[index])))
     loocv_rmse = float(np.sqrt(np.mean(np.square(loocv_errors)))) if loocv_errors else None
-    quality_status = model_quality_status(len(gcps), loocv_rmse)
+    quality_status = model_quality_status(len(used_gcps), loocv_rmse)
+    manual_count = sum(1 for gcp in used_gcps if gcp.source == "manual")
+    auto_count = sum(1 for gcp in used_gcps if gcp.source != "manual")
 
     return TransformModel(
         scope_type=scope_type,
@@ -323,9 +337,11 @@ def fit_candidate_model(
         ref_lon=ref_lon,
         ref_lat=ref_lat,
         params=params,
-        gcp_ids=[gcp.gcp_id for gcp in gcps],
-        gcp_count=len(gcps),
-        gcp_mean_confidence=sum(gcp.confidence for gcp in gcps) / len(gcps),
+        gcp_ids=[gcp.gcp_id for gcp in used_gcps],
+        gcp_count=len(used_gcps),
+        manual_count=manual_count,
+        auto_count=auto_count,
+        gcp_mean_confidence=sum(gcp.confidence for gcp in used_gcps) / len(used_gcps),
         rmse_m=rmse,
         loocv_rmse_m=loocv_rmse,
         quality_status=quality_status,
@@ -395,6 +411,8 @@ def select_best_models(gcps: list[GCP]) -> tuple[dict[str, TransformModel], list
                             "y_mode": y_mode,
                             "crs_candidate": crs_candidate,
                             "gcp_count": fitted.gcp_count,
+                            "manual_count": fitted.manual_count,
+                            "auto_count": fitted.auto_count,
                             "gcp_mean_confidence": round(fitted.gcp_mean_confidence, 4),
                             "rmse_m": round(fitted.rmse_m, 3),
                             "loocv_rmse_m": "" if fitted.loocv_rmse_m is None else round(fitted.loocv_rmse_m, 3),
@@ -815,6 +833,8 @@ def build_frame_model_rows(models: dict[str, TransformModel]) -> list[dict[str, 
                 "y_mode": model.y_mode,
                 "crs_candidate": model.crs_candidate,
                 "gcp_count": model.gcp_count,
+                "manual_count": model.manual_count,
+                "auto_count": model.auto_count,
                 "gcp_mean_confidence": round(model.gcp_mean_confidence, 4),
                 "rmse_m": round(model.rmse_m, 3),
                 "loocv_rmse_m": "" if model.loocv_rmse_m is None else round(model.loocv_rmse_m, 3),
