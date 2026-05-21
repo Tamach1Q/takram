@@ -415,6 +415,28 @@ def build_snap_displacement_vectors(sample_rows: list[dict[str, Any]]) -> list[d
     return features
 
 
+def worst_samples_to_geojson(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    features: list[dict[str, Any]] = []
+    for row in rows:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(row["longitude"]), float(row["latitude"])],
+                },
+                "properties": {
+                    "route_id": row["route_id"],
+                    "sample_index": row["sample_index"],
+                    "nearest_road_distance_m": row["nearest_road_distance_m"],
+                    "nearest_highway": row["nearest_highway"],
+                    "failed_threshold": row["failed_threshold"],
+                },
+            }
+        )
+    return features
+
+
 def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> str:
     failed_count = sum(1 for row in route_summary_rows if row["failed"])
     config = json.dumps(
@@ -460,6 +482,7 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
     <button id="showSnapped">Snapped Trial</button>
     <button id="showBoth">Both</button>
     <button id="showFailed">Failed Segments</button>
+    <button id="showDiagnostics">Diagnostics</button>
     <div id="summary" class="list"></div>
   </div>
   <div id="map"></div>
@@ -474,17 +497,19 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
       center: [133.79, 34.222],
       zoom: 13
     }});
-    const state = {{ manual: null, snapped: null, failed: null, roads: null, gcps: null, routes: [] }};
+    const state = {{ manual: null, snapped: null, failed: null, roads: null, gcps: null, snapVectors: null, worstPoints: null, routes: [] }};
     document.getElementById('routeCount').textContent = String(debugConfig.routeCount || 0);
     document.getElementById('failedCount').textContent = String(debugConfig.failedCount || 0);
     async function load() {{
       const suffix = `?v=${{encodeURIComponent(debugConfig.cacheBuster || String(Date.now()))}}`;
-      const [manualRes, snappedRes, failedRes, roadsRes, gcpsRes, summaryRes] = await Promise.all([
+      const [manualRes, snappedRes, failedRes, roadsRes, gcpsRes, snapVecRes, worstRes, summaryRes] = await Promise.all([
         fetch('manual_override_routes.geojson' + suffix, {{ cache: 'no-store' }}),
         fetch('snapped_routes.geojson' + suffix, {{ cache: 'no-store' }}),
         fetch('failed_segments.geojson' + suffix, {{ cache: 'no-store' }}),
         fetch('osm_roads.geojson' + suffix, {{ cache: 'no-store' }}),
         fetch('gcp_points.geojson' + suffix, {{ cache: 'no-store' }}),
+        fetch('snap_displacement_vectors.geojson' + suffix, {{ cache: 'no-store' }}),
+        fetch('route_samples_worst30.geojson' + suffix, {{ cache: 'no-store' }}),
         fetch('route_summary.json' + suffix, {{ cache: 'no-store' }})
       ]);
       state.manual = await manualRes.json();
@@ -492,18 +517,22 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
       state.failed = await failedRes.json();
       state.roads = await roadsRes.json();
       state.gcps = await gcpsRes.json();
+      state.snapVectors = await snapVecRes.json();
+      state.worstPoints = await worstRes.json();
       state.routes = await summaryRes.json();
       render('both');
     }}
     function ensureSources() {{
       if (map.getSource('manual')) return;
-      for (const id of ['manual','snapped','failed','roads','gcps']) {{
+      for (const id of ['manual','snapped','failed','roads','gcps','snapVectors','worstPoints']) {{
         map.addSource(id, {{ type: 'geojson', data: {{ type:'FeatureCollection', features:[] }} }});
       }}
       map.addLayer({{ id:'roads-line', type:'line', source:'roads', paint:{{ 'line-color':'#69737d', 'line-width':2, 'line-opacity':0.5 }} }});
       map.addLayer({{ id:'manual-line', type:'line', source:'manual', paint:{{ 'line-color':'#cf1b1b', 'line-width':4.5 }} }});
       map.addLayer({{ id:'snapped-line', type:'line', source:'snapped', paint:{{ 'line-color':'#0e7a7a', 'line-width':3.5, 'line-opacity':0.9 }} }});
       map.addLayer({{ id:'failed-line', type:'line', source:'failed', paint:{{ 'line-color':'#d07a00', 'line-width':6, 'line-dasharray':[1.2,0.8] }} }});
+      map.addLayer({{ id:'snap-vectors', type:'line', source:'snapVectors', paint:{{ 'line-color':'#5b4bd1', 'line-width':1.5, 'line-opacity':0.7 }} }});
+      map.addLayer({{ id:'worst-points', type:'circle', source:'worstPoints', paint:{{ 'circle-radius':5, 'circle-color':'#ffcc00', 'circle-stroke-color':'#7a4a00', 'circle-stroke-width':1.2 }} }});
       map.addLayer({{ id:'gcp-vectors', type:'line', source:'gcps', filter:['==',['get','point_kind'],'residual_vector'], paint:{{ 'line-color':'#146b78', 'line-width':2 }} }});
       map.addLayer({{ id:'gcp-points', type:'circle', source:'gcps', filter:['!=',['get','point_kind'],'residual_vector'], paint:{{ 'circle-radius':6, 'circle-color':['case',['==',['get','point_kind'],'target'],'#1f7a1f','#146b78'], 'circle-stroke-color':'#fff', 'circle-stroke-width':1.5 }} }});
       map.addLayer({{ id:'gcp-labels', type:'symbol', source:'gcps', filter:['==',['get','point_kind'],'target'], layout:{{ 'text-field':['to-string',['get','index']], 'text-offset':[0,1.1], 'text-size':11 }}, paint:{{ 'text-color':'#111','text-halo-color':'#fff','text-halo-width':1.2 }} }});
@@ -514,6 +543,8 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
       map.getSource('manual').setData(mode === 'snapped' ? {{ type:'FeatureCollection', features:[] }} : state.manual);
       map.getSource('snapped').setData(mode === 'manual' ? {{ type:'FeatureCollection', features:[] }} : state.snapped);
       map.getSource('failed').setData(mode === 'failed' || mode === 'both' ? state.failed : {{ type:'FeatureCollection', features:[] }});
+      map.getSource('snapVectors').setData(mode === 'diagnostics' || mode === 'both' ? state.snapVectors : {{ type:'FeatureCollection', features:[] }});
+      map.getSource('worstPoints').setData(mode === 'diagnostics' || mode === 'both' ? state.worstPoints : {{ type:'FeatureCollection', features:[] }});
     }}
     function renderList() {{
       document.getElementById('summary').innerHTML = state.routes.map(row => `
@@ -526,7 +557,7 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
     }}
     function fitBounds() {{
       const bounds = new mapboxgl.LngLatBounds();
-      for (const collection of [state.manual, state.snapped, state.failed, state.gcps]) {{
+      for (const collection of [state.manual, state.snapped, state.failed, state.gcps, state.snapVectors, state.worstPoints]) {{
         for (const feat of collection.features) {{
           if (feat.geometry.type === 'Point') bounds.extend(feat.geometry.coordinates);
           else if (feat.geometry.type === 'LineString') feat.geometry.coordinates.forEach(coord => bounds.extend(coord));
@@ -547,6 +578,7 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
       document.getElementById('showSnapped').onclick = () => render('snapped');
       document.getElementById('showBoth').onclick = () => render('both');
       document.getElementById('showFailed').onclick = () => render('failed');
+      document.getElementById('showDiagnostics').onclick = () => render('diagnostics');
       load();
     }});
   </script>
@@ -570,6 +602,7 @@ def write_report(path: Path, route_summary_rows: list[dict[str, Any]], sample_ro
         "- `osm_roads.geojson`",
         "- `route_samples.csv`",
         "- `route_samples_worst30.csv`",
+        "- `route_samples_worst30.geojson`",
         "- `failed_segments.geojson`",
         "- `snapped_routes.geojson`",
         "- `snap_displacement_vectors.geojson`",
@@ -614,10 +647,12 @@ def main() -> None:
     sample_rows, failed_features, snapped_features, route_summary_rows = sample_routes_against_roads(features, road_segments, ref_lon, ref_lat)
     worst30_rows = worst_samples(sample_rows, limit=30)
     snap_vectors = build_snap_displacement_vectors(sample_rows)
+    worst30_geojson = worst_samples_to_geojson(worst30_rows)
 
     write_geojson(args.out_dir / "osm_roads.geojson", roads_geojson)
     write_csv(args.out_dir / "route_samples.csv", sample_rows)
     write_csv(args.out_dir / "route_samples_worst30.csv", worst30_rows)
+    write_geojson(args.out_dir / "route_samples_worst30.geojson", worst30_geojson)
     write_geojson(args.out_dir / "failed_segments.geojson", failed_features)
     write_geojson(args.out_dir / "snapped_routes.geojson", snapped_features)
     write_geojson(args.out_dir / "snap_displacement_vectors.geojson", snap_vectors)
@@ -633,6 +668,8 @@ def main() -> None:
         ("failed_segments.geojson", args.out_dir / "failed_segments.geojson"),
         ("osm_roads.geojson", args.out_dir / "osm_roads.geojson"),
         ("gcp_points.geojson", args.gcp_points),
+        ("snap_displacement_vectors.geojson", args.out_dir / "snap_displacement_vectors.geojson"),
+        ("route_samples_worst30.geojson", args.out_dir / "route_samples_worst30.geojson"),
         ("route_summary.json", args.out_dir / "route_summary.json"),
     ]:
         (debug_dir / source_name).write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
