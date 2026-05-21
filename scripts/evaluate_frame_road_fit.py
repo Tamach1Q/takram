@@ -216,6 +216,17 @@ def nearest_road(point_xy: tuple[float, float], road_segments: list[dict[str, An
     }
 
 
+def classify_likely_issue(max_distance: float, snap_ratio: float, far_highways: list[str]) -> str:
+    footpath_like = {"footway", "path", "track", "steps", "pedestrian", "cycleway"}
+    if max_distance > 100.0:
+        return "likely_georef_misalignment"
+    if far_highways and sum(1 for item in far_highways if item in footpath_like) >= max(1, len(far_highways) // 2):
+        return "possible_missing_trail_in_osm"
+    if snap_ratio < 0.6:
+        return "mixed_alignment_or_missing_path"
+    return "needs_manual_review"
+
+
 def sample_routes_against_roads(
     routes: list[dict[str, Any]],
     road_segments: list[dict[str, Any]],
@@ -234,6 +245,8 @@ def sample_routes_against_roads(
         snapped_lines: list[list[list[float]]] = []
         failed_run: list[list[float]] = []
         route_distances: list[float] = []
+        far_highways: list[str] = []
+        failed_feature_indexes: list[int] = []
         snapped_count = 0
         total_count = 0
 
@@ -254,6 +267,7 @@ def sample_routes_against_roads(
                     lon, lat = local_equirect_to_lonlat(nearest["proj_xy"][0], nearest["proj_xy"][1], ref_lon, ref_lat)
                     snapped_line.append([round(lon, 7), round(lat, 7)])
                 else:
+                    lon, lat = sample["lonlat"][0], sample["lonlat"][1]
                     snapped_line.append([round(sample["lonlat"][0], 7), round(sample["lonlat"][1], 7)])
 
                 sample_rows.append(
@@ -268,6 +282,9 @@ def sample_routes_against_roads(
                         "nearest_highway": nearest["highway"],
                         "nearest_name": nearest["name"],
                         "osm_way_id": nearest["osm_way_id"],
+                        "snap_longitude": round(lon, 7),
+                        "snap_latitude": round(lat, 7),
+                        "snap_distance_m": round(distance_m if should_snap else 0.0, 3),
                         "snap_applied": should_snap,
                         "failed_threshold": distance_m > FAILED_THRESHOLD_M,
                     }
@@ -276,8 +293,11 @@ def sample_routes_against_roads(
                 original_point = [round(sample["lonlat"][0], 7), round(sample["lonlat"][1], 7)]
                 if distance_m > FAILED_THRESHOLD_M:
                     failed_run.append(original_point)
+                    if nearest["highway"]:
+                        far_highways.append(str(nearest["highway"]))
                 else:
                     if len(failed_run) >= 2:
+                        failed_feature_indexes.append(len(failed_features))
                         failed_features.append(
                             {
                                 "type": "Feature",
@@ -293,6 +313,7 @@ def sample_routes_against_roads(
                     failed_run = []
 
             if len(failed_run) >= 2:
+                failed_feature_indexes.append(len(failed_features))
                 failed_features.append(
                     {
                         "type": "Feature",
@@ -312,6 +333,9 @@ def sample_routes_against_roads(
         mean_distance = sum(route_distances) / len(route_distances) if route_distances else 0.0
         snap_ratio = snapped_count / total_count if total_count else 0.0
         needs_review = max_distance > FAILED_THRESHOLD_M
+        likely_issue = classify_likely_issue(max_distance, snap_ratio, far_highways)
+        for failed_index in failed_feature_indexes:
+            failed_features[failed_index]["properties"]["likely_issue"] = likely_issue
         props = dict(feature["properties"])
         props.update(
             {
@@ -321,6 +345,7 @@ def sample_routes_against_roads(
                 "road_eval_failed": needs_review,
                 "road_eval_needs_review": needs_review,
                 "road_eval_status": "needs_review" if needs_review else "ok",
+                "road_eval_likely_issue": likely_issue,
                 "road_eval_model": "osm_nearest_road",
                 "georef_model": "y_flipped_similarity",
             }
@@ -334,6 +359,7 @@ def sample_routes_against_roads(
                 "max_distance_m": round(max_distance, 3),
                 "snap_ratio": round(snap_ratio, 4),
                 "failed": needs_review,
+                "likely_issue": likely_issue,
                 "status": "needs_review" if needs_review else "ok",
             }
         )
@@ -353,6 +379,40 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         if fieldnames:
             writer.writeheader()
             writer.writerows(rows)
+
+
+def worst_samples(sample_rows: list[dict[str, Any]], limit: int = 30) -> list[dict[str, Any]]:
+    ranked = sorted(sample_rows, key=lambda row: float(row["nearest_road_distance_m"]), reverse=True)
+    return ranked[:limit]
+
+
+def build_snap_displacement_vectors(sample_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    features: list[dict[str, Any]] = []
+    for row in sample_rows:
+        if not row["snap_applied"]:
+            continue
+        if float(row["snap_distance_m"]) <= 0.01:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [float(row["longitude"]), float(row["latitude"])],
+                        [float(row["snap_longitude"]), float(row["snap_latitude"])],
+                    ],
+                },
+                "properties": {
+                    "route_id": row["route_id"],
+                    "sample_index": row["sample_index"],
+                    "snap_distance_m": row["snap_distance_m"],
+                    "nearest_highway": row["nearest_highway"],
+                    "osm_way_id": row["osm_way_id"],
+                },
+            }
+        )
+    return features
 
 
 def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> str:
@@ -459,7 +519,8 @@ def build_debug_html(token: str, route_summary_rows: list[dict[str, Any]]) -> st
       document.getElementById('summary').innerHTML = state.routes.map(row => `
         <div class="item">
           <strong>${{row.route_id}}</strong><br>
-          mean=${{row.mean_distance_m}}m / max=${{row.max_distance_m}}m / snap=${{row.snap_ratio}} / failed=${{row.failed}}
+          mean=${{row.mean_distance_m}}m / max=${{row.max_distance_m}}m / snap=${{row.snap_ratio}} / failed=${{row.failed}}<br>
+          ${{row.likely_issue}}
         </div>
       `).join('');
     }}
@@ -508,14 +569,17 @@ def write_report(path: Path, route_summary_rows: list[dict[str, Any]], sample_ro
         "## Outputs",
         "- `osm_roads.geojson`",
         "- `route_samples.csv`",
+        "- `route_samples_worst30.csv`",
         "- `failed_segments.geojson`",
         "- `snapped_routes.geojson`",
+        "- `snap_displacement_vectors.geojson`",
         "- `route_summary.csv`",
         "- `debug/index.html`",
         "",
         "## Notes",
+        "- nearest road snap は最終補正ではなく、ズレ検出用の評価処理です。",
         "- 道路距離評価は OSM `highway=*` を nearest road として計算しています。",
-        "- snap は nearest road が `SNAP_ALLOWED_HIGHWAYS` かつ 35m 以内の時だけ適用しています。",
+        "- snap は nearest road が `SNAP_ALLOWED_HIGHWAYS` かつ 35m 以内の時だけ評価用に適用しています。",
         "- 50m 超サンプルを含む区間は `failed` / `needs_review` 候補です。",
         "- OSM に存在しない山道・参道・徒歩道は無理に吸着していません。",
     ]
@@ -548,11 +612,15 @@ def main() -> None:
     roads_geojson = overpass_to_geojson(overpass)
     road_segments = prepare_road_segments(roads_geojson, ref_lon, ref_lat)
     sample_rows, failed_features, snapped_features, route_summary_rows = sample_routes_against_roads(features, road_segments, ref_lon, ref_lat)
+    worst30_rows = worst_samples(sample_rows, limit=30)
+    snap_vectors = build_snap_displacement_vectors(sample_rows)
 
     write_geojson(args.out_dir / "osm_roads.geojson", roads_geojson)
     write_csv(args.out_dir / "route_samples.csv", sample_rows)
+    write_csv(args.out_dir / "route_samples_worst30.csv", worst30_rows)
     write_geojson(args.out_dir / "failed_segments.geojson", failed_features)
     write_geojson(args.out_dir / "snapped_routes.geojson", snapped_features)
+    write_geojson(args.out_dir / "snap_displacement_vectors.geojson", snap_vectors)
     write_csv(args.out_dir / "route_summary.csv", route_summary_rows)
     (args.out_dir / "route_summary.json").write_text(json.dumps(route_summary_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     write_report(args.out_dir / "report.md", route_summary_rows, sample_rows)

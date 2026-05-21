@@ -30,6 +30,7 @@ class GCP:
     longitude: float
     confidence: float
     needs_manual_review: bool
+    page_height_pt: float
 
 
 @dataclass
@@ -39,16 +40,18 @@ class TransformModel:
     page_no: int
     frame_id: str | None
     model_name: str
+    y_mode: str
     crs_candidate: str
     min_points: int
     ref_lon: float
     ref_lat: float
-    params: np.ndarray
+    params: Any
     gcp_ids: list[str]
     gcp_count: int
     gcp_mean_confidence: float
     rmse_m: float
     loocv_rmse_m: float | None
+    quality_status: str
     seam_err_m: float | None = None
     duplicate_count: int = 0
 
@@ -66,14 +69,28 @@ def read_mapbox_token() -> str:
     return ""
 
 
-def load_gcps(path: Path) -> list[GCP]:
+def load_page_heights(path: Path) -> dict[int, float]:
+    heights: dict[int, float] = {}
+    with path.open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if not row.get("page_no") or not row.get("page_height_pt"):
+                continue
+            heights[int(row["page_no"])] = float(row["page_height_pt"])
+    return heights
+
+
+def load_gcps(path: Path, page_heights: dict[int, float]) -> list[GCP]:
     rows: list[GCP] = []
     with path.open(encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
+            page_no = int(row["page_no"])
+            page_height_pt = float(row["page_height_pt"]) if row.get("page_height_pt") else page_heights.get(page_no)
+            if page_height_pt is None:
+                raise SystemExit(f"page_height_pt が見つかりません: page {page_no}")
             rows.append(
                 GCP(
                     gcp_id=row["gcp_id"],
-                    page_no=int(row["page_no"]),
+                    page_no=page_no,
                     frame_id=row["frame_id"],
                     temple_group=row["temple_group"],
                     temple_no=int(row["temple_no"]),
@@ -83,6 +100,7 @@ def load_gcps(path: Path) -> list[GCP]:
                     longitude=float(row["longitude"]),
                     confidence=float(row["confidence"]),
                     needs_manual_review=row["needs_manual_review"] == "True",
+                    page_height_pt=float(page_height_pt),
                 )
             )
     return rows
@@ -143,6 +161,33 @@ def xy_to_lonlat(points: np.ndarray, crs_candidate: str, ref_lon: float, ref_lat
     return np.array(lonlat, dtype=float)
 
 
+def fit_similarity(source: np.ndarray, target: np.ndarray) -> dict[str, np.ndarray | float]:
+    src_mean = source.mean(axis=0)
+    tgt_mean = target.mean(axis=0)
+    src_centered = source - src_mean
+    tgt_centered = target - tgt_mean
+
+    covariance = (tgt_centered.T @ src_centered) / len(source)
+    u, d, vt = np.linalg.svd(covariance)
+    s = np.eye(2)
+    if np.linalg.det(u) * np.linalg.det(vt) < 0:
+        s[-1, -1] = -1
+    rotation = u @ s @ vt
+    variance = np.mean(np.sum(src_centered * src_centered, axis=1))
+    if variance <= 1e-12:
+        raise np.linalg.LinAlgError("degenerate source variance")
+    scale = np.trace(np.diag(d) @ s) / variance
+    translation = tgt_mean - (scale * (rotation @ src_mean))
+    return {"rotation": rotation, "scale": scale, "translation": translation}
+
+
+def apply_similarity(points: np.ndarray, params: dict[str, np.ndarray | float]) -> np.ndarray:
+    rotation = params["rotation"]
+    scale = float(params["scale"])
+    translation = params["translation"]
+    return ((scale * (rotation @ points.T)).T) + translation
+
+
 def fit_affine(source: np.ndarray, target: np.ndarray) -> np.ndarray:
     design = np.column_stack([source[:, 0], source[:, 1], np.ones(len(source))])
     params, *_ = np.linalg.lstsq(design, target, rcond=None)
@@ -195,15 +240,36 @@ def apply_poly2(points: np.ndarray, params: np.ndarray) -> np.ndarray:
 
 
 MODEL_SPECS: dict[str, tuple[int, Any, Any]] = {
+    "similarity": (2, fit_similarity, apply_similarity),
     "affine": (3, fit_affine, apply_affine),
     "projective": (4, fit_projective, apply_projective),
-    "polynomial2": (6, fit_poly2, apply_poly2),
+    "polynomial2": (8, fit_poly2, apply_poly2),
 }
 
 
 def rms_errors(left: np.ndarray, right: np.ndarray) -> float:
     deltas = left - right
     return float(np.sqrt(np.mean(np.sum(deltas * deltas, axis=1))))
+
+
+def source_points(gcps: list[GCP], y_mode: str) -> np.ndarray:
+    rows: list[tuple[float, float]] = []
+    for gcp in gcps:
+        y = gcp.pdf_y if y_mode == "raw_y" else (gcp.page_height_pt - gcp.pdf_y)
+        rows.append((gcp.pdf_x, y))
+    return np.array(rows, dtype=float)
+
+
+def model_quality_status(gcp_count: int, loocv_rmse_m: float | None) -> str:
+    if gcp_count < 4:
+        return "fail"
+    if loocv_rmse_m is None:
+        return "fail"
+    if loocv_rmse_m < 50.0:
+        return "pass"
+    if loocv_rmse_m <= 150.0:
+        return "review"
+    return "fail"
 
 
 def fit_candidate_model(
@@ -213,12 +279,13 @@ def fit_candidate_model(
     page_no: int,
     frame_id: str | None,
     model_name: str,
+    y_mode: str,
     crs_candidate: str,
 ) -> TransformModel | None:
     min_points, fit_fn, apply_fn = MODEL_SPECS[model_name]
     if len(gcps) < min_points:
         return None
-    source = np.array([(gcp.pdf_x, gcp.pdf_y) for gcp in gcps], dtype=float)
+    source = source_points(gcps, y_mode)
     ref_lon = sum(gcp.longitude for gcp in gcps) / len(gcps)
     ref_lat = sum(gcp.latitude for gcp in gcps) / len(gcps)
     target = target_xy(gcps, crs_candidate, ref_lon, ref_lat)
@@ -242,6 +309,7 @@ def fit_candidate_model(
                 continue
             loocv_errors.append(float(np.linalg.norm(predicted[0] - target[index])))
     loocv_rmse = float(np.sqrt(np.mean(np.square(loocv_errors)))) if loocv_errors else None
+    quality_status = model_quality_status(len(gcps), loocv_rmse)
 
     return TransformModel(
         scope_type=scope_type,
@@ -249,6 +317,7 @@ def fit_candidate_model(
         page_no=page_no,
         frame_id=frame_id,
         model_name=model_name,
+        y_mode=y_mode,
         crs_candidate=crs_candidate,
         min_points=min_points,
         ref_lon=ref_lon,
@@ -259,13 +328,28 @@ def fit_candidate_model(
         gcp_mean_confidence=sum(gcp.confidence for gcp in gcps) / len(gcps),
         rmse_m=rmse,
         loocv_rmse_m=loocv_rmse,
+        quality_status=quality_status,
     )
 
 
 def model_sort_key(model: TransformModel) -> tuple[float, float, float]:
-    loocv = model.loocv_rmse_m if model.loocv_rmse_m is not None else (model.rmse_m + 120.0)
-    complexity_penalty = {"affine": 0.0, "projective": 8.0, "polynomial2": 18.0}[model.model_name]
-    return (loocv + complexity_penalty, model.rmse_m, -model.gcp_count)
+    loocv = model.loocv_rmse_m if model.loocv_rmse_m is not None else (model.rmse_m + 1000.0)
+    complexity_penalty = {"similarity": 0.0, "affine": 5.0, "projective": 15.0, "polynomial2": 30.0}[model.model_name]
+    y_penalty = {"y_flipped": 0.0, "raw_y": 60.0}[model.y_mode]
+    status_penalty = {"pass": 0.0, "review": 25.0, "fail": 1000.0}[model.quality_status]
+    return (loocv + complexity_penalty + y_penalty + status_penalty, model.rmse_m, -model.gcp_count)
+
+
+def candidate_metric(model: TransformModel) -> float:
+    return model.loocv_rmse_m if model.loocv_rmse_m is not None else (model.rmse_m + 1000.0)
+
+
+def alternative_clearly_better(candidate: TransformModel, baseline: TransformModel) -> bool:
+    if candidate.model_name == "similarity":
+        return False
+    improvement = candidate_metric(baseline) - candidate_metric(candidate)
+    required = max(15.0, candidate_metric(baseline) * 0.2)
+    return improvement >= required
 
 
 def select_best_models(gcps: list[GCP]) -> tuple[dict[str, TransformModel], list[dict[str, Any]]]:
@@ -285,18 +369,21 @@ def select_best_models(gcps: list[GCP]) -> tuple[dict[str, TransformModel], list
     for scope_id, scope_gcps in by_scope.items():
         scope_type, page_no, frame_id = scope_meta[scope_id]
         candidates: list[TransformModel] = []
-        for crs_candidate in ["local_equirect_m", "web_mercator_m"]:
-            for model_name in MODEL_SPECS:
-                fitted = fit_candidate_model(
-                    scope_gcps,
-                    scope_type=scope_type,
-                    scope_id=scope_id,
-                    page_no=page_no,
-                    frame_id=frame_id,
-                    model_name=model_name,
-                    crs_candidate=crs_candidate,
-                )
-                if fitted:
+        for y_mode in ["y_flipped", "raw_y"]:
+            for crs_candidate in ["local_equirect_m", "web_mercator_m"]:
+                for model_name in MODEL_SPECS:
+                    fitted = fit_candidate_model(
+                        scope_gcps,
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        page_no=page_no,
+                        frame_id=frame_id,
+                        model_name=model_name,
+                        y_mode=y_mode,
+                        crs_candidate=crs_candidate,
+                    )
+                    if not fitted:
+                        continue
                     candidates.append(fitted)
                     diagnostics.append(
                         {
@@ -305,17 +392,39 @@ def select_best_models(gcps: list[GCP]) -> tuple[dict[str, TransformModel], list
                             "page_no": page_no,
                             "frame_id": frame_id or "",
                             "candidate_model": model_name,
+                            "y_mode": y_mode,
                             "crs_candidate": crs_candidate,
                             "gcp_count": fitted.gcp_count,
                             "gcp_mean_confidence": round(fitted.gcp_mean_confidence, 4),
                             "rmse_m": round(fitted.rmse_m, 3),
                             "loocv_rmse_m": "" if fitted.loocv_rmse_m is None else round(fitted.loocv_rmse_m, 3),
+                            "quality_status": fitted.quality_status,
+                            "selected": False,
                         }
                     )
-        if not candidates:
+        eligible = [candidate for candidate in candidates if candidate.quality_status in {"pass", "review"}]
+        if not eligible:
             continue
-        candidates.sort(key=model_sort_key)
-        selected[scope_id] = candidates[0]
+
+        similarity_candidates = [candidate for candidate in eligible if candidate.model_name == "similarity"]
+        base_model = sorted(similarity_candidates, key=model_sort_key)[0] if similarity_candidates else sorted(eligible, key=model_sort_key)[0]
+        selected_model = base_model
+        for candidate in sorted(eligible, key=model_sort_key):
+            if candidate is base_model:
+                continue
+            if alternative_clearly_better(candidate, base_model):
+                selected_model = candidate
+                break
+        selected[scope_id] = selected_model
+        for row in diagnostics:
+            if (
+                row["scope_id"] == scope_id
+                and row["candidate_model"] == selected_model.model_name
+                and row["y_mode"] == selected_model.y_mode
+                and row["crs_candidate"] == selected_model.crs_candidate
+            ):
+                row["selected"] = True
+                break
     return selected, diagnostics
 
 
@@ -348,7 +457,7 @@ def compute_seam_errors(models: dict[str, TransformModel], gcps: list[GCP]) -> N
             model = models.get(scope_id)
             if not model:
                 continue
-            points = np.array([[gcp.pdf_x, gcp.pdf_y]], dtype=float)
+            points = source_points([gcp], model.y_mode)
             lonlat = apply_model(model, points)[0]
             transformed.append((scope_id, lonlat))
         for i in range(len(transformed)):
@@ -374,7 +483,12 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2.0 * EARTH_RADIUS_M * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
 
-def choose_route_model(route: dict[str, Any], models: dict[str, TransformModel]) -> tuple[TransformModel | None, list[str]]:
+def choose_route_model(
+    route: dict[str, Any],
+    models: dict[str, TransformModel],
+    *,
+    allow_page_fallback: bool,
+) -> tuple[TransformModel | None, list[str]]:
     page_no = int(route["properties"]["page_no"])
     frame_id = route["properties"].get("frame_id") or ""
     reasons: list[str] = []
@@ -383,6 +497,9 @@ def choose_route_model(route: dict[str, Any], models: dict[str, TransformModel])
         if scope_id in models:
             return models[scope_id], reasons
         reasons.append("missing_frame_model")
+        if not allow_page_fallback:
+            reasons.append("page_model_fallback_disabled")
+            return None, reasons
     page_scope = f"page:{page_no}"
     if page_scope in models:
         reasons.append("page_model_fallback")
@@ -391,9 +508,26 @@ def choose_route_model(route: dict[str, Any], models: dict[str, TransformModel])
     return None, reasons
 
 
-def transform_geometry(geometry: dict[str, Any], model: TransformModel) -> dict[str, Any]:
+def source_points_for_geometry(geometry: dict[str, Any], y_mode: str, page_height_pt: float) -> list[np.ndarray]:
     if geometry["type"] == "LineString":
-        pdf_points = np.array([synthetic_to_pdf(coord) for coord in geometry["coordinates"]], dtype=float)
+        raw = np.array([synthetic_to_pdf(coord) for coord in geometry["coordinates"]], dtype=float)
+        if y_mode == "y_flipped":
+            raw[:, 1] = page_height_pt - raw[:, 1]
+        return [raw]
+    if geometry["type"] == "MultiLineString":
+        lines: list[np.ndarray] = []
+        for line in geometry["coordinates"]:
+            raw = np.array([synthetic_to_pdf(coord) for coord in line], dtype=float)
+            if y_mode == "y_flipped":
+                raw[:, 1] = page_height_pt - raw[:, 1]
+            lines.append(raw)
+        return lines
+    raise ValueError(f"unsupported geometry type: {geometry['type']}")
+
+
+def transform_geometry(geometry: dict[str, Any], model: TransformModel, page_height_pt: float) -> dict[str, Any]:
+    if geometry["type"] == "LineString":
+        pdf_points = source_points_for_geometry(geometry, model.y_mode, page_height_pt)[0]
         lonlat = apply_model(model, pdf_points)
         return {
             "type": "LineString",
@@ -401,8 +535,7 @@ def transform_geometry(geometry: dict[str, Any], model: TransformModel) -> dict[
         }
     if geometry["type"] == "MultiLineString":
         lines = []
-        for line in geometry["coordinates"]:
-            pdf_points = np.array([synthetic_to_pdf(coord) for coord in line], dtype=float)
+        for pdf_points in source_points_for_geometry(geometry, model.y_mode, page_height_pt):
             lonlat = apply_model(model, pdf_points)
             lines.append([[round(float(lon), 7), round(float(lat), 7)] for lon, lat in lonlat])
         return {"type": "MultiLineString", "coordinates": lines}
@@ -439,9 +572,14 @@ def route_transform_confidence(route_conf: float, model: TransformModel, used_pa
     score = route_conf
     score *= model.gcp_mean_confidence
     if model.loocv_rmse_m is not None:
-        score *= max(0.25, 1.0 - (model.loocv_rmse_m / 1500.0))
+        if model.loocv_rmse_m < 50.0:
+            score *= 0.98
+        elif model.loocv_rmse_m <= 150.0:
+            score *= max(0.45, 0.8 - ((model.loocv_rmse_m - 50.0) / 250.0))
+        else:
+            score *= 0.2
     else:
-        score *= max(0.35, 1.0 - (model.rmse_m / 1200.0))
+        score *= 0.2
     if model.seam_err_m is not None:
         score *= max(0.3, 1.0 - (model.seam_err_m / 2000.0))
     if used_page_fallback:
@@ -452,6 +590,9 @@ def route_transform_confidence(route_conf: float, model: TransformModel, used_pa
 def build_outputs(
     routes: list[dict[str, Any]],
     models: dict[str, TransformModel],
+    page_heights: dict[int, float],
+    *,
+    allow_page_fallback: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     transformed: list[dict[str, Any]] = []
     untransformed: list[dict[str, Any]] = []
@@ -460,9 +601,10 @@ def build_outputs(
     for feature in routes:
         properties = dict(feature["properties"])
         route_id = properties["route_id"]
-        model, reasons = choose_route_model(feature, models)
+        model, reasons = choose_route_model(feature, models, allow_page_fallback=allow_page_fallback)
         page_no = int(properties["page_no"])
         frame_id = properties.get("frame_id") or ""
+        page_height_pt = page_heights.get(page_no)
         route_conf = float(properties.get("confidence") or 0.0)
         existing_reasons = [reason for reason in str(properties.get("review_reasons") or "").split(",") if reason]
         needs_manual_review = bool(properties.get("needs_manual_review"))
@@ -476,11 +618,45 @@ def build_outputs(
                     "frame_id": frame_id,
                     "transform_scope": "",
                     "transform_model": "",
+                    "y_mode": "",
+                    "model_quality_status": "",
                     "crs_candidate": "",
                     "gcp_count": 0,
                     "rmse_m": "",
                     "loocv_rmse_m": "",
                     "seam_err_m": "",
+                    "confidence": round(route_conf, 4),
+                    "needs_manual_review": True,
+                    "review_reasons": ",".join(dict.fromkeys(status_reasons)),
+                }
+            )
+            untransformed.append(
+                {
+                    "route_id": route_id,
+                    "page_no": page_no,
+                    "frame_id": frame_id,
+                    "review_reasons": ",".join(dict.fromkeys(status_reasons)),
+                    "style_class": properties.get("style_class", ""),
+                }
+            )
+            continue
+
+        if page_height_pt is None:
+            status_reasons = existing_reasons + reasons + ["missing_page_height", "route_not_transformed"]
+            route_status.append(
+                {
+                    "route_id": route_id,
+                    "page_no": page_no,
+                    "frame_id": frame_id,
+                    "transform_scope": model.scope_id,
+                    "transform_model": model.model_name,
+                    "y_mode": model.y_mode,
+                    "model_quality_status": model.quality_status,
+                    "crs_candidate": model.crs_candidate,
+                    "gcp_count": model.gcp_count,
+                    "rmse_m": round(model.rmse_m, 3),
+                    "loocv_rmse_m": "" if model.loocv_rmse_m is None else round(model.loocv_rmse_m, 3),
+                    "seam_err_m": "" if model.seam_err_m is None else round(model.seam_err_m, 3),
                     "confidence": round(route_conf, 4),
                     "needs_manual_review": True,
                     "review_reasons": ",".join(dict.fromkeys(status_reasons)),
@@ -502,15 +678,17 @@ def build_outputs(
         status_reasons = existing_reasons + reasons
         if used_page_fallback:
             status_reasons.append("page_model_fallback")
-        if model.loocv_rmse_m is not None and model.loocv_rmse_m > 250:
-            status_reasons.append("loocv_high")
+        if model.quality_status == "review":
+            status_reasons.append("loocv_review")
+        if model.quality_status == "fail":
+            status_reasons.append("loocv_fail")
         if model.rmse_m > 150:
             status_reasons.append("fit_rmse_high")
         if model.seam_err_m is not None and model.seam_err_m > 200:
             status_reasons.append("seam_proxy_high")
 
         try:
-            geometry = transform_geometry(feature["geometry"], model)
+            geometry = transform_geometry(feature["geometry"], model, page_height_pt)
         except Exception:
             status_reasons.append("transform_failed")
             route_status.append(
@@ -520,6 +698,8 @@ def build_outputs(
                     "frame_id": frame_id,
                     "transform_scope": model.scope_id,
                     "transform_model": model.model_name,
+                    "y_mode": model.y_mode,
+                    "model_quality_status": model.quality_status,
                     "crs_candidate": model.crs_candidate,
                     "gcp_count": model.gcp_count,
                     "rmse_m": round(model.rmse_m, 3),
@@ -541,6 +721,8 @@ def build_outputs(
                     "frame_id": frame_id,
                     "transform_scope": model.scope_id,
                     "transform_model": "",
+                    "y_mode": "",
+                    "model_quality_status": "",
                     "crs_candidate": "",
                     "gcp_count": 0,
                     "rmse_m": "",
@@ -562,13 +744,15 @@ def build_outputs(
             )
             continue
 
-        final_review = needs_manual_review or used_page_fallback or transform_conf < 0.75 or "loocv_high" in status_reasons
+        final_review = needs_manual_review or used_page_fallback or transform_conf < 0.75 or model.quality_status != "pass"
         final_properties = dict(properties)
         final_properties.update(
             {
                 "coordinate_space": "wgs84",
                 "transform_scope": model.scope_id,
                 "transform_model": model.model_name,
+                "y_mode": model.y_mode,
+                "model_quality_status": model.quality_status,
                 "crs_candidate": model.crs_candidate,
                 "gcp_count": model.gcp_count,
                 "rmse_m": round(model.rmse_m, 3),
@@ -588,6 +772,8 @@ def build_outputs(
                 "frame_id": frame_id,
                 "transform_scope": model.scope_id,
                 "transform_model": model.model_name,
+                "y_mode": model.y_mode,
+                "model_quality_status": model.quality_status,
                 "crs_candidate": model.crs_candidate,
                 "gcp_count": model.gcp_count,
                 "rmse_m": round(model.rmse_m, 3),
@@ -626,11 +812,13 @@ def build_frame_model_rows(models: dict[str, TransformModel]) -> list[dict[str, 
                 "page_no": model.page_no,
                 "frame_id": model.frame_id or "",
                 "transform_model": model.model_name,
+                "y_mode": model.y_mode,
                 "crs_candidate": model.crs_candidate,
                 "gcp_count": model.gcp_count,
                 "gcp_mean_confidence": round(model.gcp_mean_confidence, 4),
                 "rmse_m": round(model.rmse_m, 3),
                 "loocv_rmse_m": "" if model.loocv_rmse_m is None else round(model.loocv_rmse_m, 3),
+                "quality_status": model.quality_status,
                 "seam_err_m": "" if model.seam_err_m is None else round(model.seam_err_m, 3),
                 "duplicate_count": model.duplicate_count,
                 "gcp_ids": "|".join(model.gcp_ids),
@@ -900,8 +1088,9 @@ def write_report(
             "- Mapbox debug HTML: `artifacts/step5/mapbox_route_debug/index.html`",
             "",
             "## Notes",
-            "- `page_model_fallback` は frame 単独の GCP が足りず、同一ページ全体のモデルを使ったルートです。",
-            "- `missing_frame_model` / `missing_page_model` は Step 4 の GCP 密度不足で未変換になったルートです。",
+            "- 標準の優先順位は `y_flipped + similarity` です。高自由度モデルは LOOCV が明確に改善した場合だけ採用します。",
+            "- `page_model_fallback` は debug 用の `--allow-page-fallback` を有効にした時だけ使います。本番既定では禁止です。",
+            "- `missing_frame_model` / `missing_page_model` は Step 4 の GCP 密度不足、または採用条件を満たさず未変換になったルートです。",
             "- `seam_err_m` は重複寺院ラベルから計算したページ間継ぎ目の proxy です。Step 6 で本格的な seam 最適化を入れます。",
         ]
     )
@@ -912,15 +1101,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Step 5: georeference route geometries from GCP candidates")
     parser.add_argument("--routes", type=Path, default=Path("artifacts/step3/merged_routes.geojson"))
     parser.add_argument("--gcps", type=Path, default=Path("artifacts/step4/gcp_candidates.csv"))
+    parser.add_argument("--page-metadata", type=Path, default=Path("artifacts/step1/page_red_summary.csv"))
     parser.add_argument("--out-dir", type=Path, default=Path("artifacts/step5"))
+    parser.add_argument("--allow-page-fallback", action="store_true")
     args = parser.parse_args()
 
     ensure_dir(args.out_dir)
-    gcps = load_gcps(args.gcps)
+    page_heights = load_page_heights(args.page_metadata)
+    gcps = load_gcps(args.gcps, page_heights)
     routes = load_routes(args.routes)
     models, candidate_rows = select_best_models(gcps)
     compute_seam_errors(models, gcps)
-    transformed, untransformed, route_status = build_outputs(routes, models)
+    transformed, untransformed, route_status = build_outputs(
+        routes,
+        models,
+        page_heights,
+        allow_page_fallback=args.allow_page_fallback,
+    )
     frame_model_rows = build_frame_model_rows(models)
     trusted_routes = [feature for feature in transformed if not feature["properties"]["needs_manual_review"]]
 
