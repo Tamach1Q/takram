@@ -17,6 +17,9 @@
 PyMuPDFの page.get_drawings() と page.get_text("dict") を使い、線の色、線幅、dash、bbox、pathを取得する。
 OCRは最後のfallbackに限定する。
 
+PDF:
+PDFは/Desktop/takram/四国遍路ひとり歩き同行二人（地図編）第14版第1刷.pdf
+
 対象:
 地図ページを対象にする。
 表紙、目次、解説のみのページ、宿泊施設リストなどは除外する。
