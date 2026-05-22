@@ -17,6 +17,9 @@ from PIL import Image, ImageDraw
 TARGET_RED = (237 / 255.0, 28 / 255.0, 36 / 255.0)
 DEFAULT_L1_THRESHOLD = 0.08
 DEFAULT_PREVIEW_PAGES = 5
+PRIMARY_ROUTE_CLASS = "route_candidate_solid_main"
+DASHED_NONROUTE_CLASSES = {"red_dashed_nonroute", "annotation_dashed"}
+ANNOTATION_CLASSES = {"filled_symbol_or_legend", "small_symbol_or_label", "legend_like", "red_annotation_solid", "unknown_red"}
 
 
 @dataclass
@@ -199,17 +202,27 @@ def classify_red_object(row: dict[str, Any]) -> str:
     rect_h = row["bbox_h_pt"]
     path_len = row["path_length_pt"]
     fill_distance = row["fill_l1_distance"]
+    closed_count = row["closed_count"]
+    segment_count = row["segment_count"]
+    boxy_perimeter = (2.0 * (rect_w + rect_h)) if rect_w > 0 and rect_h > 0 else 0.0
+    box_like = closed_count > 0 and rect_w >= 18 and rect_h >= 18 and path_len <= boxy_perimeter + 12.0
 
     if item_type == "fs" or fill_distance is not None:
         return "filled_symbol_or_legend"
     if rect_w < 14 and rect_h < 14 and path_len < 40:
         return "small_symbol_or_label"
-    if dash != "solid" and 0.8 <= width <= 2.4 and path_len >= 20:
-        return "route_candidate_dashed"
-    if dash == "solid" and 0.8 <= width <= 2.4 and path_len >= 15:
-        return "route_candidate_solid_aux"
+    if dash != "solid":
+        if 0.8 <= width <= 2.4 and path_len >= 20:
+            return "red_dashed_nonroute"
+        return "annotation_dashed"
     if rect_w > 120 and rect_h < 40 and path_len < 300:
         return "legend_like"
+    if box_like:
+        return "red_annotation_solid"
+    if dash == "solid" and 0.8 <= width <= 2.4 and path_len >= 15 and segment_count >= 1:
+        return PRIMARY_ROUTE_CLASS
+    if path_len >= 10:
+        return "red_annotation_solid"
     return "unknown_red"
 
 
@@ -349,7 +362,7 @@ def scan_pdf(pdf_path: Path, out_dir: Path, l1_threshold: float, preview_pages: 
     red_rows_sorted = sorted(
         red_rows,
         key=lambda row: (
-            row["classification"] != "route_candidate_dashed",
+            row["classification"] != PRIMARY_ROUTE_CLASS,
             -row["path_length_pt"],
             row["page_no"],
             row["draw_index"],
@@ -424,14 +437,14 @@ def scan_pdf(pdf_path: Path, out_dir: Path, l1_threshold: float, preview_pages: 
                 row["bbox_x1_pt"],
                 row["bbox_y1_pt"],
             )
-            if row["classification"] == "route_candidate_dashed":
-                overlay_polylines(draw, polylines, scale, "#00C2FF", width=5)
-            elif row["classification"] == "route_candidate_solid_aux":
-                overlay_polylines(draw, polylines, scale, "#7CFF6B", width=4)
-            elif row["classification"] in {"filled_symbol_or_legend", "small_symbol_or_label"}:
-                overlay_polylines(draw, polylines, scale, "#FFD166", width=2)
-                if row["classification"] == "filled_symbol_or_legend" and row["bbox_w_pt"] * row["bbox_h_pt"] > 1200:
-                    overlay_rect(draw, rect, scale, "#FFD166", width=1)
+            if row["classification"] == PRIMARY_ROUTE_CLASS:
+                overlay_polylines(draw, polylines, scale, "#DC2626", width=5)
+            elif row["classification"] in DASHED_NONROUTE_CLASSES:
+                overlay_polylines(draw, polylines, scale, "#2563EB", width=4)
+            elif row["classification"] in ANNOTATION_CLASSES:
+                overlay_polylines(draw, polylines, scale, "#6B7280", width=2)
+                if row["classification"] in {"filled_symbol_or_legend", "legend_like", "red_annotation_solid"} and row["bbox_w_pt"] * row["bbox_h_pt"] > 1200:
+                    overlay_rect(draw, rect, scale, "#6B7280", width=1)
             else:
                 overlay_polylines(draw, polylines, scale, "#FF4D6D", width=2)
                 if not polylines:
@@ -503,10 +516,12 @@ def scan_pdf(pdf_path: Path, out_dir: Path, l1_threshold: float, preview_pages: 
         [
             "",
             "## Heuristic Split",
-            f"- Dashed route candidates: `{class_counts.get('route_candidate_dashed', 0)}`",
-            f"- Solid auxiliary candidates: `{class_counts.get('route_candidate_solid_aux', 0)}`",
+            f"- Solid route candidates: `{class_counts.get(PRIMARY_ROUTE_CLASS, 0)}`",
+            f"- Excluded dashed non-route: `{class_counts.get('red_dashed_nonroute', 0)}`",
+            f"- Dashed annotations: `{class_counts.get('annotation_dashed', 0)}`",
             f"- Filled symbols / legends: `{class_counts.get('filled_symbol_or_legend', 0)}`",
             f"- Small symbols / labels: `{class_counts.get('small_symbol_or_label', 0)}`",
+            f"- Solid red annotations: `{class_counts.get('red_annotation_solid', 0)}`",
             f"- Unknown red: `{class_counts.get('unknown_red', 0)}`",
             "",
             "## Dominant Dash Patterns",

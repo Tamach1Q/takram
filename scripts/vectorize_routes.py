@@ -13,8 +13,10 @@ from typing import Any
 import fitz
 
 
-ROUTE_CLASSES = {"route_candidate_dashed", "route_candidate_solid_aux"}
-TARGET_DASHES = {"[ .05 2.5 ] 0", "[ .02 3 ] 0"}
+PRIMARY_ROUTE_CLASS = "route_candidate_solid_main"
+ROUTE_CLASSES = {PRIMARY_ROUTE_CLASS}
+EXCLUDED_DASHED_CLASSES = {"red_dashed_nonroute", "annotation_dashed"}
+EXCLUDED_ANNOTATION_CLASSES = {"filled_symbol_or_legend", "small_symbol_or_label", "legend_like", "red_annotation_solid", "unknown_red"}
 MAPBOX_SCALE = 0.01
 
 
@@ -219,12 +221,10 @@ def load_csv_rows(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(handle))
 
 
-def load_route_rows(step2_dir: Path) -> list[dict[str, Any]]:
+def load_step2_rows(step2_dir: Path) -> list[dict[str, Any]]:
     rows = load_csv_rows(step2_dir / "red_objects_with_frames.csv")
     parsed: list[dict[str, Any]] = []
     for row in rows:
-        if row["classification"] not in ROUTE_CLASSES:
-            continue
         for field in [
             "page_no",
             "draw_index",
@@ -253,29 +253,18 @@ def load_frames(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def style_class_from_row(row: dict[str, Any]) -> str:
-    if row["classification"] == "route_candidate_dashed":
+    if row["classification"] == PRIMARY_ROUTE_CLASS:
         return "walk_main"
-    if row["classification"] == "route_candidate_solid_aux":
-        return "walk_sub"
     return "unknown_red"
 
 
 def segment_confidence(row: dict[str, Any], length_pt: float) -> tuple[float, list[str]]:
     reasons: list[str] = []
-    confidence = 0.45
-    if row["classification"] == "route_candidate_dashed":
-        confidence += 0.28
-        if row["dashes"] in TARGET_DASHES:
-            confidence += 0.12
-        if abs(row["width_pt"] - 1.25) <= 0.08 or abs(row["width_pt"] - 2.0) <= 0.08:
+    confidence = 0.58
+    if row["classification"] == PRIMARY_ROUTE_CLASS:
+        confidence += 0.16
+        if 0.9 <= row["width_pt"] <= 2.2:
             confidence += 0.08
-    elif row["classification"] == "route_candidate_solid_aux":
-        confidence += 0.12
-        if abs(row["width_pt"] - 0.85) <= 0.08:
-            confidence += 0.10
-        if length_pt < 18:
-            reasons.append("short_aux_segment")
-            confidence -= 0.10
     if length_pt >= 40:
         confidence += 0.06
     elif length_pt < 10:
@@ -555,6 +544,32 @@ def write_geojson(path: Path, features: list[dict[str, Any]]) -> None:
     path.write_text(json.dumps({"type": "FeatureCollection", "features": features}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def feature_from_polylines(
+    *,
+    row: dict[str, Any],
+    polylines: list[list[tuple[float, float]]],
+    source_kind: str,
+) -> dict[str, Any] | None:
+    usable = [polyline for polyline in polylines if len(polyline) >= 2 and polyline_length(polyline) >= 4.0]
+    if not usable:
+        return None
+    if len(usable) == 1:
+        geometry = {"type": "LineString", "coordinates": to_synthetic_coords(usable[0])}
+    else:
+        geometry = {"type": "MultiLineString", "coordinates": [to_synthetic_coords(polyline) for polyline in usable]}
+    properties = {
+        "page_no": row["page_no"],
+        "frame_id": row.get("frame_id") or None,
+        "draw_index": row["draw_index"],
+        "classification": row["classification"],
+        "width_pt": round(row["width_pt"], 3),
+        "dashes": row["dashes"],
+        "path_length_pt": round(row["path_length_pt"], 3),
+        "debug_source_kind": source_kind,
+    }
+    return make_geojson_feature(geometry, properties)
+
+
 def write_manual_review_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     if rows:
         fieldnames = list(rows[0].keys())
@@ -706,7 +721,7 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
       <select id="frameSelect"></select>
       <div class="toggle">
         <button id="mergedBtn" class="active">Merged</button>
-        <button id="rawBtn">Raw</button>
+        <button id="rawBtn">Overlay</button>
       </div>
       <div class="metric"><strong id="segmentCount">0</strong>segment count</div>
       <div class="metric"><strong id="routeCount">0</strong>merged route count</div>
@@ -733,7 +748,9 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
     const state = {{
       showRaw: false,
       pages: [],
-      raw: [],
+      solid: [],
+      excludedDashed: [],
+      excludedAnnotations: [],
       merged: [],
       issues: [],
       currentPage: null,
@@ -774,16 +791,20 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
     }});
 
     async function loadData() {{
-      const [pagesRes, rawRes, mergedRes, issuesRes] = await Promise.all([
+      const [pagesRes, solidRes, excludedDashedRes, excludedAnnotationsRes, mergedRoutesRes, manualIssuesRes] = await Promise.all([
         fetch('page_manifest.json'),
-        fetch('raw_segments.geojson'),
+        fetch('solid_only_routes.geojson'),
+        fetch('excluded_dashed.geojson'),
+        fetch('excluded_red_annotations.geojson'),
         fetch('merged_routes.geojson'),
         fetch('manual_review.json')
       ]);
       state.pages = await pagesRes.json();
-      state.raw = (await rawRes.json()).features;
-      state.merged = (await mergedRes.json()).features;
-      state.issues = await issuesRes.json();
+      state.solid = (await solidRes.json()).features;
+      state.excludedDashed = (await excludedDashedRes.json()).features;
+      state.excludedAnnotations = (await excludedAnnotationsRes.json()).features;
+      state.merged = (await mergedRoutesRes.json()).features;
+      state.issues = await manualIssuesRes.json();
       initSelectors();
       state.currentPage = state.pages[0]?.page_no || null;
       updateFrameOptions();
@@ -825,7 +846,8 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
 
     function updateFrameOptions() {{
       const merged = state.merged.filter(f => f.properties.page_no === state.currentPage);
-      const frameIds = Array.from(new Set(merged.map(f => f.properties.frame_id).filter(Boolean))).sort();
+      const solids = state.solid.filter(f => f.properties.page_no === state.currentPage);
+      const frameIds = Array.from(new Set([...merged, ...solids].map(f => f.properties.frame_id).filter(Boolean))).sort();
       els.frameSelect.innerHTML = '';
       const all = document.createElement('option');
       all.value = 'all';
@@ -883,49 +905,84 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
           type: 'line',
           source: 'merged-routes',
           paint: {{
-            'line-color': ['case', ['boolean', ['get', 'needs_manual_review'], false], '#c73e1d', '#0f7b6c'],
+            'line-color': ['case', ['boolean', ['get', 'needs_manual_review'], false], '#9f1239', '#dc2626'],
             'line-width': ['case', ['==', ['get', 'style_class'], 'walk_main'], 4, 3],
             'line-dasharray': ['case', ['boolean', ['get', 'needs_manual_review'], false], ['literal', [0.8, 1.2]], ['literal', [1, 0]]]
           }}
         }});
       }}
-      if (!map.getLayer('raw-main')) {{
+      if (!map.getLayer('solid-main')) {{
         map.addLayer({{
-          id: 'raw-main',
+          id: 'solid-main',
           type: 'line',
-          source: 'raw-segments',
+          source: 'solid-routes',
           layout: {{ visibility: 'none' }},
           paint: {{
-            'line-color': ['case', ['==', ['get', 'style_class'], 'walk_main'], '#1f78b4', '#7fc97f'],
+            'line-color': '#dc2626',
+            'line-width': 3
+          }}
+        }});
+      }}
+      if (!map.getLayer('excluded-dashed')) {{
+        map.addLayer({{
+          id: 'excluded-dashed',
+          type: 'line',
+          source: 'excluded-dashed',
+          layout: {{ visibility: 'none' }},
+          paint: {{
+            'line-color': '#2563eb',
+            'line-width': 2.5,
+            'line-dasharray': ['literal', [1.2, 1.0]]
+          }}
+        }});
+      }}
+      if (!map.getLayer('excluded-annotations')) {{
+        map.addLayer({{
+          id: 'excluded-annotations',
+          type: 'line',
+          source: 'excluded-annotations',
+          layout: {{ visibility: 'none' }},
+          paint: {{
+            'line-color': '#6b7280',
             'line-width': 2,
-            'line-dasharray': ['case', ['==', ['get', 'style_class'], 'walk_main'], ['literal', [1.2, 1.0]], ['literal', [1, 0]]]
+            'line-opacity': 0.9
           }}
         }});
       }}
     }}
 
     function updateLayers() {{
-      const raw = filteredFeatures(state.raw);
+      const solid = filteredFeatures(state.solid);
+      const excludedDashed = filteredFeatures(state.excludedDashed);
+      const excludedAnnotations = filteredFeatures(state.excludedAnnotations);
       const merged = filteredFeatures(state.merged);
-      updateSource('raw-segments', raw);
+      updateSource('solid-routes', solid);
+      updateSource('excluded-dashed', excludedDashed);
+      updateSource('excluded-annotations', excludedAnnotations);
       updateSource('merged-routes', merged);
       ensureLayers();
-      map.setLayoutProperty('raw-main', 'visibility', state.showRaw ? 'visible' : 'none');
+      map.setLayoutProperty('solid-main', 'visibility', state.showRaw ? 'visible' : 'none');
+      map.setLayoutProperty('excluded-dashed', 'visibility', state.showRaw ? 'visible' : 'none');
+      map.setLayoutProperty('excluded-annotations', 'visibility', state.showRaw ? 'visible' : 'none');
       map.setLayoutProperty('merged-main', 'visibility', state.showRaw ? 'none' : 'visible');
-      els.segmentCount.textContent = String(raw.length);
+      els.segmentCount.textContent = String(solid.length);
       els.routeCount.textContent = String(merged.length);
       renderDiagnostics();
     }}
 
     function renderDiagnostics() {{
-      const raw = filteredFeatures(state.raw);
+      const solid = filteredFeatures(state.solid);
+      const excludedDashed = filteredFeatures(state.excludedDashed);
+      const excludedAnnotations = filteredFeatures(state.excludedAnnotations);
       const merged = filteredFeatures(state.merged);
       const issues = state.issues.filter(issue => issue.page_no === state.currentPage && (state.currentFrame === 'all' || issue.frame_id === state.currentFrame));
       els.issueCount.textContent = String(issues.length);
       const summary = {{
         page: state.currentPage,
         frame: state.currentFrame,
-        raw_segments: raw.length,
+        solid_routes: solid.length,
+        excluded_dashed: excludedDashed.length,
+        excluded_annotations: excludedAnnotations.length,
         merged_routes: merged.length,
         manual_review: issues.length,
         log: state.logs.slice(-5)
@@ -939,7 +996,7 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
     }}
 
     function attachPopups() {{
-      const layers = ['merged-main', 'raw-main'];
+      const layers = ['merged-main', 'solid-main', 'excluded-dashed', 'excluded-annotations'];
       for (const layerId of layers) {{
         map.on('click', layerId, event => {{
           const feature = event.features?.[0];
@@ -983,6 +1040,8 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
     frames = load_frames(step2_dir / "frames.csv")
     frame_source_by_id = {frame_id: row.get("source_kind") for frame_id, row in frames.items()}
     raw_segments: list[RouteSegment] = []
+    excluded_dashed_features: list[dict[str, Any]] = []
+    excluded_annotation_features: list[dict[str, Any]] = []
     manual_review_rows: list[dict[str, Any]] = []
     issue_index = 1
 
@@ -1015,48 +1074,57 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
     else:
         if pdf_path is None:
             raise SystemExit("PDF が必要です。--raw-segments を指定するか PDF パスを渡してください。")
-        route_rows = load_route_rows(step2_dir)
+        step2_rows = load_step2_rows(step2_dir)
         doc = fitz.open(pdf_path)
         page_drawings: dict[int, list[Any]] = {}
         segment_counter = 1
-        for row in route_rows:
+        for row in step2_rows:
             page_no = row["page_no"]
             if page_no not in page_drawings:
                 page = doc.load_page(page_no - 1)
                 page_drawings[page_no] = page.get_drawings()
             drawing = page_drawings[page_no][row["draw_index"]]
             polylines = polylines_from_items(drawing.get("items", []))
-            if not polylines:
-                continue
-            for polyline_index, points in enumerate(polylines):
-                if len(points) < 2:
+            if row["classification"] == PRIMARY_ROUTE_CLASS:
+                if not polylines:
                     continue
-                length_pt = polyline_length(points)
-                if length_pt < 4.0:
-                    continue
-                confidence, confidence_reasons = segment_confidence(row, length_pt)
-                style_class = style_class_from_row(row)
-                review_reasons = list(confidence_reasons)
-                if confidence < 0.58:
-                    review_reasons.append("low_confidence")
-                segment = RouteSegment(
-                    segment_id=f"seg_{segment_counter:06d}",
-                    page_no=page_no,
-                    frame_id=row.get("frame_id") or None,
-                    draw_index=row["draw_index"],
-                    polyline_index=polyline_index,
-                    style_class=style_class,
-                    classification=row["classification"],
-                    width_pt=row["width_pt"],
-                    dashes=row["dashes"],
-                    points_pdf=points,
-                    length_pt=length_pt,
-                    confidence=confidence,
-                    needs_manual_review=bool(review_reasons),
-                    review_reasons=review_reasons,
-                )
-                raw_segments.append(segment)
-                segment_counter += 1
+                for polyline_index, points in enumerate(polylines):
+                    if len(points) < 2:
+                        continue
+                    length_pt = polyline_length(points)
+                    if length_pt < 4.0:
+                        continue
+                    confidence, confidence_reasons = segment_confidence(row, length_pt)
+                    style_class = style_class_from_row(row)
+                    review_reasons = list(confidence_reasons)
+                    if confidence < 0.58:
+                        review_reasons.append("low_confidence")
+                    segment = RouteSegment(
+                        segment_id=f"seg_{segment_counter:06d}",
+                        page_no=page_no,
+                        frame_id=row.get("frame_id") or None,
+                        draw_index=row["draw_index"],
+                        polyline_index=polyline_index,
+                        style_class=style_class,
+                        classification=row["classification"],
+                        width_pt=row["width_pt"],
+                        dashes=row["dashes"],
+                        points_pdf=points,
+                        length_pt=length_pt,
+                        confidence=confidence,
+                        needs_manual_review=bool(review_reasons),
+                        review_reasons=review_reasons,
+                    )
+                    raw_segments.append(segment)
+                    segment_counter += 1
+            elif row["classification"] in EXCLUDED_DASHED_CLASSES:
+                feature = feature_from_polylines(row=row, polylines=polylines, source_kind="excluded_dashed")
+                if feature is not None:
+                    excluded_dashed_features.append(feature)
+            elif row["classification"] in EXCLUDED_ANNOTATION_CLASSES:
+                feature = feature_from_polylines(row=row, polylines=polylines, source_kind="excluded_annotation")
+                if feature is not None:
+                    excluded_annotation_features.append(feature)
         if pdf_path is not None:
             doc.close()
 
@@ -1226,6 +1294,9 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
         page_manifest = json.loads((debug_dir / "page_manifest.json").read_text(encoding="utf-8"))
 
     raw_geojson_path = out_dir / "raw_segments.geojson"
+    solid_only_geojson_path = out_dir / "solid_only_routes.geojson"
+    excluded_dashed_geojson_path = out_dir / "excluded_dashed.geojson"
+    excluded_annotations_geojson_path = out_dir / "excluded_red_annotations.geojson"
     merged_geojson_path = out_dir / "merged_routes.geojson"
     manual_review_csv_path = out_dir / "manual_review.csv"
     manual_review_json_path = debug_dir / "manual_review.json"
@@ -1233,10 +1304,16 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
     log_path = out_dir / "extraction_log.json"
 
     write_geojson(raw_geojson_path, raw_features)
+    write_geojson(solid_only_geojson_path, raw_features)
+    write_geojson(excluded_dashed_geojson_path, excluded_dashed_features)
+    write_geojson(excluded_annotations_geojson_path, excluded_annotation_features)
     write_geojson(merged_geojson_path, merged_features)
     write_manual_review_csv(manual_review_csv_path, manual_review_rows)
     manual_review_json_path.write_text(json.dumps(manual_review_rows, ensure_ascii=False, indent=2), encoding="utf-8")
     (debug_dir / "raw_segments.geojson").write_text(raw_geojson_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (debug_dir / "solid_only_routes.geojson").write_text(solid_only_geojson_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (debug_dir / "excluded_dashed.geojson").write_text(excluded_dashed_geojson_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (debug_dir / "excluded_red_annotations.geojson").write_text(excluded_annotations_geojson_path.read_text(encoding="utf-8"), encoding="utf-8")
     (debug_dir / "merged_routes.geojson").write_text(merged_geojson_path.read_text(encoding="utf-8"), encoding="utf-8")
     (debug_dir / "page_manifest.json").write_text(json.dumps(page_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1255,7 +1332,9 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
         "# Step 3 Report",
         "",
         f"- PDF: `{report_pdf_label}`",
-        f"- Raw route segments: `{len(raw_segments)}`",
+        f"- Solid route segments: `{len(raw_segments)}`",
+        f"- Excluded dashed debug segments: `{len(excluded_dashed_features)}`",
+        f"- Excluded annotation debug segments: `{len(excluded_annotation_features)}`",
         f"- Merged routes: `{len(merged_routes)}`",
         f"- Manual review issues: `{len(manual_review_rows)}`",
         f"- Pages with route output: `{len(route_pages)}`",
@@ -1269,6 +1348,9 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
         "",
         "## Outputs",
         f"- Raw segments: `{raw_geojson_path}`",
+        f"- Solid-only routes: `{solid_only_geojson_path}`",
+        f"- Excluded dashed: `{excluded_dashed_geojson_path}`",
+        f"- Excluded red annotations: `{excluded_annotations_geojson_path}`",
         f"- Merged routes: `{merged_geojson_path}`",
         f"- Manual review CSV: `{manual_review_csv_path}`",
         f"- Mapbox debug HTML: `{debug_dir / 'index.html'}`",
@@ -1288,6 +1370,9 @@ def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path:
         "issue_counts": issue_counter,
         "outputs": {
             "raw_segments_geojson": str(raw_geojson_path),
+            "solid_only_routes_geojson": str(solid_only_geojson_path),
+            "excluded_dashed_geojson": str(excluded_dashed_geojson_path),
+            "excluded_red_annotations_geojson": str(excluded_annotations_geojson_path),
             "merged_routes_geojson": str(merged_geojson_path),
             "manual_review_csv": str(manual_review_csv_path),
             "report_md": str(report_path),

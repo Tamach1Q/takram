@@ -13,7 +13,10 @@ import fitz
 from PIL import Image, ImageDraw
 
 
-ROUTE_CLASSES = {"route_candidate_dashed", "route_candidate_solid_aux"}
+PRIMARY_ROUTE_CLASS = "route_candidate_solid_main"
+ROUTE_CLASSES = {PRIMARY_ROUTE_CLASS}
+DASHED_CLASSES = {"red_dashed_nonroute", "annotation_dashed"}
+ANNOTATION_CLASSES = {"filled_symbol_or_legend", "small_symbol_or_label", "legend_like", "red_annotation_solid", "unknown_red"}
 PREVIEW_COLORS = [
     "#00C2FF",
     "#7CFF6B",
@@ -180,7 +183,7 @@ def compute_candidate_score(
     complexity: int,
     page_rect: fitz.Rect,
 ) -> float:
-    route_count = counts["route_candidate_dashed"] + counts["route_candidate_solid_aux"]
+    route_count = counts[PRIMARY_ROUTE_CLASS]
     route_density = route_count / max(rect.width * rect.height, 1.0)
     score = 0.0
     if is_pale_map_fill(fill_rgb):
@@ -234,7 +237,7 @@ def extract_frame_candidates(page: fitz.Page, red_rows: list[dict[str, Any]]) ->
         stroke_rgb = color_tuple(drawing.get("color"))
         fill_rgb = color_tuple(drawing.get("fill"))
         counts = gather_counts_in_rect(all_page_red, (rect.x0, rect.y0, rect.x1, rect.y1))
-        route_count = counts["route_candidate_dashed"] + counts["route_candidate_solid_aux"]
+        route_count = counts[PRIMARY_ROUTE_CLASS]
         route_density = route_count / max(rect.width * rect.height, 1.0)
         score = compute_candidate_score(
             rect=rect,
@@ -286,8 +289,8 @@ def extract_frame_candidates(page: fitz.Page, red_rows: list[dict[str, Any]]) ->
                 has_rect_like=has_rect_like,
                 complexity=complexity,
                 route_object_count=route_count,
-                dashed_route_count=counts["route_candidate_dashed"],
-                solid_route_count=counts["route_candidate_solid_aux"],
+                dashed_route_count=sum(counts[name] for name in DASHED_CLASSES),
+                solid_route_count=counts[PRIMARY_ROUTE_CLASS],
                 red_object_count=sum(counts.values()),
                 filled_symbol_count=counts["filled_symbol_or_legend"],
                 unknown_red_count=counts["unknown_red"],
@@ -478,8 +481,8 @@ def fallback_frame_from_cluster(page_no: int, cluster_id: int, cluster: list[dic
     y0 = max(0.0, y0)
     x1 = min(float(page_rect.width), x1)
     y1 = min(float(page_rect.height), y1)
-    dashed_count = sum(1 for row in cluster if row["classification"] == "route_candidate_dashed")
-    solid_count = sum(1 for row in cluster if row["classification"] == "route_candidate_solid_aux")
+    dashed_count = sum(1 for row in cluster if row["classification"] in DASHED_CLASSES)
+    solid_count = sum(1 for row in cluster if row["classification"] == PRIMARY_ROUTE_CLASS)
     return FrameCandidate(
         page_no=page_no,
         candidate_id=100000 + cluster_id,
@@ -655,7 +658,7 @@ def overlay_route_object(draw: ImageDraw.ImageDraw, row: dict[str, Any], scale: 
         row["bbox_x1_pt"] * scale,
         row["bbox_y1_pt"] * scale,
     ]
-    width = 3 if row["classification"] == "route_candidate_dashed" else 2
+    width = 3 if row["classification"] in DASHED_CLASSES else 2
     draw.rectangle(rect, outline=color, width=width)
 
 
@@ -795,9 +798,12 @@ def build_step2(
 
         for row in preview_rows_by_page.get(page_no, []):
             frame_id = row.get("frame_id")
-            if not frame_id or row["classification"] not in ROUTE_CLASSES:
-                continue
-            overlay_route_object(draw, row, scale, frame_color_map.get(frame_id, "#FF4D6D"))
+            if row["classification"] == PRIMARY_ROUTE_CLASS and frame_id:
+                overlay_route_object(draw, row, scale, "#DC2626")
+            elif row["classification"] in DASHED_CLASSES:
+                overlay_route_object(draw, row, scale, "#2563EB")
+            elif row["classification"] in ANNOTATION_CLASSES:
+                overlay_route_object(draw, row, scale, "#6B7280")
 
         preview_path = previews_dir / f"page_{page_no:03d}.png"
         image.save(preview_path)

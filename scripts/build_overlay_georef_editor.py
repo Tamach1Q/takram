@@ -574,7 +574,73 @@ def build_html(config: dict[str, Any]) -> str:
       white-space: pre-wrap;
       color: var(--muted);
     }
+    #metrics {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
     #metrics strong { color: var(--text); }
+    .metricMeta {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .metricActive {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: rgba(29,78,216,0.12);
+      color: var(--accent-2);
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.03em;
+    }
+    .metricRmse {
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 900;
+    }
+    .metricCompare {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .metricHint {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .metricWarning {
+      color: #b45309;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .metricQuality {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .metricQuality.pass {
+      background: rgba(22,163,74,0.14);
+      color: #166534;
+    }
+    .metricQuality.review {
+      background: rgba(245,158,11,0.16);
+      color: #b45309;
+    }
+    .metricQuality.fail {
+      background: rgba(220,38,38,0.14);
+      color: #b91c1c;
+    }
     #workspace {
       display: grid;
       min-height: 0;
@@ -633,7 +699,9 @@ def build_html(config: dict[str, Any]) -> str:
     }
     #pdfCanvas {
       position: absolute;
-      inset: 0;
+      top: 0;
+      left: 0;
+      display: block;
       cursor: crosshair;
       touch-action: none;
     }
@@ -684,6 +752,93 @@ def build_html(config: dict[str, Any]) -> str:
       font-size: 11px;
       line-height: 1.45;
       margin: 0;
+    }
+    #residualPanel {
+      position: absolute;
+      top: 72px;
+      right: 12px;
+      z-index: 6;
+      width: min(360px, calc(100% - 24px));
+      max-height: min(48%, 420px);
+      overflow: auto;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(15,23,42,0.12);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(15,23,42,0.08);
+      padding: 12px;
+    }
+    .residualHeader {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .residualTitle {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+    }
+    .residualSub {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .residualEmpty {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .residualList {
+      display: grid;
+      gap: 8px;
+    }
+    .residualRowCard {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(15,23,42,0.1);
+      background: rgba(248,250,252,0.95);
+    }
+    .residualRowCard.warn {
+      border-color: rgba(245,158,11,0.38);
+      background: rgba(255,251,235,0.96);
+    }
+    .residualRowCard.bad {
+      border-color: rgba(220,38,38,0.28);
+      background: rgba(254,242,242,0.98);
+    }
+    .residualRank {
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+    }
+    .residualMain {
+      min-width: 0;
+    }
+    .residualPoint {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--text);
+    }
+    .residualMeta {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .residualDelete {
+      min-height: 30px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(220,38,38,0.22);
+      background: rgba(255,255,255,0.96);
+      color: #b91c1c;
+      font-size: 11px;
+      font-weight: 800;
     }
     #pdfError {
       position: absolute;
@@ -809,18 +964,21 @@ def build_html(config: dict[str, Any]) -> str:
         <div class="paneHeader">
           <div class="paneTitle">Mapbox</div>
           <div class="paneControls">
-            <span class="toolbarLabel">既定: 2点 similarity</span>
+            <span class="toolbarLabel">既定: Auto / projective は手動</span>
           </div>
         </div>
         <div id="map"></div>
         <div id="rightError"></div>
+        <div id="residualPanel"></div>
         <details id="advancedPanel">
           <summary>Advanced</summary>
           <div class="advancedRow">
             <label for="transformSelect">Preview transform</label>
             <select id="transformSelect">
+              <option value="auto">Auto</option>
               <option value="similarity">Similarity</option>
-              <option value="projective">Projective (4点以上)</option>
+              <option value="affine">Affine (3点以上)</option>
+              <option value="projective">Projective (4点以上 / Advanced)</option>
             </select>
           </div>
           <div class="advancedNote">画像overlayのドラッグ移動・回転・四隅ハンドルは一旦外しています。必要ならここに再追加します。</div>
@@ -840,6 +998,7 @@ def build_html(config: dict[str, Any]) -> str:
     const EARTH_RADIUS_M = 6378137.0;
     const ui = {
       workspace: document.getElementById('workspace'),
+      pdfPane: document.getElementById('pdfPane'),
       frameSelect: document.getElementById('frameSelect'),
       frameCount: document.getElementById('frameCount'),
       undoButton: document.getElementById('undoButton'),
@@ -861,6 +1020,7 @@ def build_html(config: dict[str, Any]) -> str:
       pdfError: document.getElementById('pdfError'),
       pdfDebug: document.getElementById('pdfDebug'),
       rightError: document.getElementById('rightError'),
+      residualPanel: document.getElementById('residualPanel'),
       jsonPreview: document.getElementById('jsonPreview'),
     };
     const pdfCtx = ui.pdfCanvas.getContext('2d');
@@ -928,7 +1088,6 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function resolveLayoutMode(frame) {
-      if (frame.frame_id === '061_f06') return 'stacked';
       return aspectRatio(frame) > 2.2 ? 'stacked' : 'split';
     }
 
@@ -997,22 +1156,52 @@ def build_html(config: dict[str, Any]) -> str:
       }
 
       const preview = state.preview;
-      const modelBits = [];
-      if (preview && preview.metrics_by_model) {
-        if (Number.isFinite(preview.metrics_by_model.similarity)) {
-          modelBits.push(`sim ${preview.metrics_by_model.similarity.toFixed(2)}m`);
-        }
-        if (Number.isFinite(preview.metrics_by_model.affine)) {
-          modelBits.push(`aff ${preview.metrics_by_model.affine.toFixed(2)}m`);
-        }
-        if (Number.isFinite(preview.metrics_by_model.projective)) {
-          modelBits.push(`proj ${preview.metrics_by_model.projective.toFixed(2)}m`);
-        }
-      }
       const activeRmse = preview && Number.isFinite(preview.rmse_m) ? `${preview.rmse_m.toFixed(2)} m` : '-';
-      ui.metrics.innerHTML = `<strong>frame</strong>: ${frame.frame_id} / <strong>pairs</strong>: ${done} / <strong>active</strong>: ${preview ? preview.transform_type : 'none'} / <strong>RMSE</strong>: ${activeRmse}${modelBits.length ? ` / <strong>compare</strong>: ${modelBits.join(' | ')}` : ''}`;
+      const compareText = preview ? buildCompareText(preview.metrics_by_model, preview) : '';
+      const autoHint = preview && preview.selection_mode === 'auto' && preview.projective_compare_enabled
+        ? '<span class="metricHint">projective は compare のみ</span>'
+        : '';
+      const warningText = preview && preview.warnings?.length
+        ? `<span class="metricWarning">${preview.warnings.join(' / ')}</span>`
+        : '';
+      const qualityBadge = preview
+        ? `<span class="metricQuality ${preview.quality_status}">${preview.quality_status}</span>`
+        : '';
+      ui.metrics.innerHTML = `
+        <span class="metricMeta"><strong>frame</strong>: ${frame.frame_id} / <strong>pairs</strong>: ${done}</span>
+        <span class="metricActive">active: ${preview ? preview.transform_type : 'none'}</span>
+        ${qualityBadge}
+        <span class="metricRmse">RMSE ${activeRmse}</span>
+        ${compareText ? `<span class="metricCompare">compare ${compareText}</span>` : ''}
+        ${autoHint}
+        ${warningText}
+      `;
       ui.notice.textContent = state.notice || '';
       ui.pdfZoomLabel.textContent = `${currentZoomPercent(state)}%`;
+    }
+
+    function buildCompareText(metricsByModel, preview = null) {
+      if (!metricsByModel) return '';
+      const tokens = [];
+      if (Number.isFinite(metricsByModel.similarity)) tokens.push(`sim ${metricsByModel.similarity.toFixed(2)}m`);
+      if (Number.isFinite(metricsByModel.affine)) tokens.push(`aff ${metricsByModel.affine.toFixed(2)}m`);
+      if (Number.isFinite(metricsByModel.projective) && (!preview || preview.projective_compare_enabled || preview.selection_mode === 'projective')) {
+        tokens.push(`proj ${metricsByModel.projective.toFixed(2)}m`);
+      }
+      return tokens.join(' | ');
+    }
+
+    function qualityStatusForRmse(rmse) {
+      if (!Number.isFinite(rmse)) return 'review';
+      if (rmse < 50) return 'pass';
+      if (rmse <= 100) return 'review';
+      return 'fail';
+    }
+
+    function residualSeverity(errorM) {
+      if (errorM > 100) return 'bad';
+      if (errorM >= 50) return 'warn';
+      return 'ok';
     }
 
     async function loadImage(url) {
@@ -1028,12 +1217,18 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function resizePdfCanvas() {
+      const header = ui.pdfPane.querySelector('.paneHeader');
+      const paneRect = ui.pdfPane.getBoundingClientRect();
+      const headerHeight = header ? header.getBoundingClientRect().height : 0;
+      const width = Math.max(1, Math.round(paneRect.width));
+      const height = Math.max(1, Math.round(paneRect.height - headerHeight));
+      ui.pdfCanvas.style.top = `${Math.round(headerHeight)}px`;
+      ui.pdfCanvas.style.width = `${width}px`;
+      ui.pdfCanvas.style.height = `${height}px`;
       const rect = ui.pdfCanvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       ui.pdfCanvas.width = Math.round(rect.width * dpr);
       ui.pdfCanvas.height = Math.round(rect.height * dpr);
-      ui.pdfCanvas.style.width = `${rect.width}px`;
-      ui.pdfCanvas.style.height = `${rect.height}px`;
       pdfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       return rect;
     }
@@ -1127,10 +1322,17 @@ def build_html(config: dict[str, Any]) -> str:
       pdfCtx.lineWidth = 3;
       pdfCtx.strokeRect(layout.x, layout.y, layout.width, layout.height);
 
+      const severityByLabel = new Map((state.preview?.residual_ranking || []).map((row) => [row.label, row.severity]));
       state.controlPoints.forEach((pair, index) => {
         if (!pair.pdf_px) return;
         const point = pdfToCanvas(layout, pair.pdf_px);
-        drawMarker(pdfCtx, point.x, point.y, index + 1, 'rgba(29,78,216,0.98)', '#ffffff', '#ffffff');
+        const severity = severityByLabel.get(String(index + 1)) || 'ok';
+        const fillColor = severity === 'bad'
+          ? 'rgba(220,38,38,0.98)'
+          : severity === 'warn'
+            ? 'rgba(245,158,11,0.98)'
+            : 'rgba(29,78,216,0.98)';
+        drawMarker(pdfCtx, point.x, point.y, index + 1, fillColor, '#ffffff', '#ffffff');
       });
 
       ui.pdfDebug.textContent = [
@@ -1141,7 +1343,7 @@ def build_html(config: dict[str, Any]) -> str:
         `layout mode: ${layoutMode}`,
         `current zoom: ${currentZoomPercent(state)}%`,
         `current pan: (${Math.round(state.pdfView.panX)}, ${Math.round(state.pdfView.panY)})`,
-      ].join('\n');
+      ].join('\\n');
     }
 
     function localMeters(lonlat, refLonLat) {
@@ -1316,6 +1518,15 @@ def build_html(config: dict[str, Any]) -> str:
       return models;
     }
 
+    function selectActiveModel(selected, models, metricsByModel, pairCount) {
+      if (selected === 'similarity') return models.similarity;
+      if (selected === 'affine') return models.affine || models.similarity;
+      if (selected === 'projective') return models.projective || models.affine || models.similarity;
+      if (pairCount <= 2) return models.similarity;
+      if (models.affine) return models.affine;
+      return models.similarity;
+    }
+
     function imageCorners(frame) {
       return [
         [0, 0],
@@ -1351,17 +1562,14 @@ def build_html(config: dict[str, Any]) -> str:
         throw new Error('2組以上の対応点が必要です。');
       }
       const models = buildModels(pairs);
-      const selected = currentTransformChoice();
-      let activeModel = models.similarity;
-      if (selected === 'projective' && models.projective) {
-        activeModel = models.projective;
-      }
-
+      const projectiveCompareEnabled = pairs.length >= 5;
       const metricsByModel = {
         similarity: models.similarity ? rmseForModel(models.similarity, pairs) : null,
         affine: models.affine ? rmseForModel(models.affine, pairs) : null,
         projective: models.projective ? rmseForModel(models.projective, pairs) : null,
       };
+      const selected = currentTransformChoice();
+      const activeModel = selectActiveModel(selected, models, metricsByModel, pairs.length);
 
       const transformedControl = [];
       const residuals = [];
@@ -1374,12 +1582,21 @@ def build_html(config: dict[str, Any]) -> str:
         const error = Math.hypot(predMeters[0] - targetMeters[0], predMeters[1] - targetMeters[1]);
         sumSq += error * error;
         residuals.push({
+          point_index: index,
           label: String(index + 1),
           coordinates: [predicted, pair.lonlat],
           error_m: error,
+          severity: residualSeverity(error),
         });
       });
       const rmse = Math.sqrt(sumSq / pairs.length);
+      const warnings = [];
+      if (pairs.length === 4 && Number.isFinite(metricsByModel.projective) && Math.abs(metricsByModel.projective) < 1e-9) {
+        warnings.push('4点 projective の RMSE=0 は過信禁止');
+      }
+      const residualRanking = [...residuals]
+        .sort((a, b) => b.error_m - a.error_m)
+        .map((row, rank) => ({ ...row, rank: rank + 1 }));
       const corners = imageCorners(frame).map((point) => activeModel.apply(point).map((value) => Number(value.toFixed(7))));
       const transformedRoutes = {
         type: 'FeatureCollection',
@@ -1391,11 +1608,17 @@ def build_html(config: dict[str, Any]) -> str:
       };
       return {
         transform_type: activeModel.type,
+        selection_mode: selected,
+        pair_count: pairs.length,
+        quality_status: qualityStatusForRmse(rmse),
+        warnings,
+        projective_compare_enabled: projectiveCompareEnabled,
         rmse_m: rmse,
         metrics_by_model: metricsByModel,
         transformed_routes: transformedRoutes,
         transformed_control_points: transformedControl,
         residuals,
+        residual_ranking: residualRanking,
         corners_lonlat: {
           top_left: corners[0],
           top_right: corners[1],
@@ -1490,12 +1713,14 @@ def build_html(config: dict[str, Any]) -> str:
       if (!mapReady) return;
       const controlFeatures = [];
       const residualFeatures = [];
+      const severityByLabel = new Map((state.preview?.residual_ranking || []).map((row) => [row.label, row.severity]));
       state.controlPoints.forEach((pair, index) => {
         if (pair.lonlat) {
+          const label = String(index + 1);
           controlFeatures.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: pair.lonlat },
-            properties: { label: String(index + 1), kind: 'target' },
+            properties: { label, kind: 'target', severity: severityByLabel.get(label) || 'ok' },
           });
         }
       });
@@ -1504,14 +1729,14 @@ def build_html(config: dict[str, Any]) -> str:
           controlFeatures.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: point.lonlat },
-            properties: { label: point.label, kind: 'predicted' },
+            properties: { label: point.label, kind: 'predicted', severity: severityByLabel.get(point.label) || 'ok' },
           });
         });
         state.preview.residuals.forEach((row) => {
           residualFeatures.push({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: row.coordinates },
-            properties: { label: row.label, error_m: row.error_m },
+            properties: { label: row.label, error_m: row.error_m, severity: row.severity || 'ok' },
           });
         });
       }
@@ -1520,11 +1745,36 @@ def build_html(config: dict[str, Any]) -> str:
       map.getSource('residuals')?.setData({ type: 'FeatureCollection', features: residualFeatures });
     }
 
+    function updateResidualPanel(state) {
+      if (!state.preview || !state.preview.residual_ranking?.length) {
+        ui.residualPanel.innerHTML = '<div class="residualEmpty">Preview 後に残差ランキングを表示します。</div>';
+        return;
+      }
+      const rows = state.preview.residual_ranking.map((row) => `
+        <div class="residualRowCard ${row.severity}">
+          <div class="residualRank">#${row.rank}</div>
+          <div class="residualMain">
+            <div class="residualPoint">点 ${row.label} / ${row.error_m.toFixed(2)} m</div>
+            <div class="residualMeta">severity: ${row.severity} / target index: ${row.point_index + 1}</div>
+          </div>
+          <button class="residualDelete" data-remove-point-index="${row.point_index}">削除</button>
+        </div>
+      `).join('');
+      ui.residualPanel.innerHTML = `
+        <div class="residualHeader">
+          <div class="residualTitle">Residual Ranking</div>
+          <div class="residualSub">${state.preview.quality_status.toUpperCase()} / ${state.preview.residual_ranking.length} 点</div>
+        </div>
+        <div class="residualList">${rows}</div>
+      `;
+    }
+
     function updateUi() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
       updateStepText(frame, state);
       updateJsonPreview(frame, state);
+      updateResidualPanel(state);
       updateMapSources(frame, state);
     }
 
@@ -1541,11 +1791,9 @@ def build_html(config: dict[str, Any]) -> str:
       try {
         state.preview = buildPreview(frame, state);
         state.dirty = true;
-        const compare = [];
-        const metrics = state.preview.metrics_by_model || {};
-        if (Number.isFinite(metrics.affine)) compare.push(`aff ${metrics.affine.toFixed(2)}m`);
-        if (Number.isFinite(metrics.projective)) compare.push(`proj ${metrics.projective.toFixed(2)}m`);
-        state.notice = `Preview 更新 / active ${state.preview.transform_type} / RMSE ${state.preview.rmse_m.toFixed(2)} m${compare.length ? ` / compare ${compare.join(' | ')}` : ''}`;
+        const compare = buildCompareText(state.preview.metrics_by_model, state.preview);
+        const warning = state.preview.warnings?.length ? ` / warning ${state.preview.warnings.join(' / ')}` : '';
+        state.notice = `Preview 更新 / active ${state.preview.transform_type} / RMSE ${state.preview.rmse_m.toFixed(2)} m / ${state.preview.quality_status}${compare ? ` / compare ${compare}` : ''}${warning}`;
         updateUi();
         fitMapToCoords(coordsFromCorners(state.preview.corners_lonlat));
       } catch (error) {
@@ -1621,6 +1869,22 @@ def build_html(config: dict[str, Any]) -> str:
     function onClear() {
       const frame = frameById(currentFrameId);
       resetFrame(frame);
+    }
+
+    function onRemovePoint(pointIndex) {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      if (pointIndex < 0 || pointIndex >= state.controlPoints.length) return;
+      state.controlPoints.splice(pointIndex, 1);
+      state.preview = null;
+      state.dirty = true;
+      if (completedPairs(state) >= 2) {
+        previewCurrent();
+      } else {
+        state.notice = `対応点 ${pointIndex + 1} を削除しました`;
+        renderAll();
+        fitMapToFrameInitial(frame);
+      }
     }
 
     function onSave() {
@@ -1778,7 +2042,12 @@ def build_html(config: dict[str, Any]) -> str:
           id: 'residuals-line',
           type: 'line',
           source: 'residuals',
-          paint: { 'line-color': '#0f172a', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': 0.65 },
+          paint: {
+            'line-color': ['match', ['get', 'severity'], 'bad', '#dc2626', 'warn', '#f59e0b', '#0f172a'],
+            'line-width': 1.5,
+            'line-dasharray': [2, 2],
+            'line-opacity': 0.65,
+          },
         });
         map.addLayer({
           id: 'control-target-circle',
@@ -1787,7 +2056,7 @@ def build_html(config: dict[str, Any]) -> str:
           filter: ['==', ['get', 'kind'], 'target'],
           paint: {
             'circle-radius': 8,
-            'circle-color': '#f59e0b',
+            'circle-color': ['match', ['get', 'severity'], 'bad', '#dc2626', 'warn', '#f59e0b', '#f59e0b'],
             'circle-stroke-width': 2,
             'circle-stroke-color': '#ffffff',
           },
@@ -1799,7 +2068,7 @@ def build_html(config: dict[str, Any]) -> str:
           filter: ['==', ['get', 'kind'], 'predicted'],
           paint: {
             'circle-radius': 7,
-            'circle-color': '#2563eb',
+            'circle-color': ['match', ['get', 'severity'], 'bad', '#dc2626', 'warn', '#f59e0b', '#2563eb'],
             'circle-stroke-width': 2,
             'circle-stroke-color': '#ffffff',
           },
@@ -1838,6 +2107,11 @@ def build_html(config: dict[str, Any]) -> str:
       ui.zoomInButton.addEventListener('click', () => onZoomStep(1.12));
       ui.zoomResetButton.addEventListener('click', onZoomReset);
       ui.fitWidthButton.addEventListener('click', onFitWidth);
+      ui.residualPanel.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-remove-point-index]');
+        if (!button) return;
+        onRemovePoint(Number(button.dataset.removePointIndex));
+      });
       ui.transformSelect.addEventListener('change', () => {
         const frame = frameById(currentFrameId);
         const state = getState(frame);
