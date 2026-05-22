@@ -287,6 +287,60 @@ def segment_confidence(row: dict[str, Any], length_pt: float) -> tuple[float, li
     return max(0.0, min(confidence, 0.98)), reasons
 
 
+def segment_geometry_review_reasons(
+    segment: RouteSegment,
+    frame_row: dict[str, Any] | None,
+) -> list[str]:
+    reasons: list[str] = []
+    if segment.style_class != "walk_sub" or not frame_row:
+        return reasons
+    frame_x0 = float(frame_row["x0_pt"])
+    frame_y0 = float(frame_row["y0_pt"])
+    frame_x1 = float(frame_row["x1_pt"])
+    frame_y1 = float(frame_row["y1_pt"])
+    frame_w = float(frame_row["width_pt"])
+    frame_h = float(frame_row["height_pt"])
+    seg_x0, seg_y0, seg_x1, seg_y1 = segment.bbox
+    seg_w = seg_x1 - seg_x0
+    seg_h = seg_y1 - seg_y0
+    near_bottom = abs(seg_y1 - frame_y1) <= 12.0
+    near_top = abs(seg_y0 - frame_y0) <= 12.0
+    near_left = abs(seg_x0 - frame_x0) <= 12.0
+    near_right = abs(seg_x1 - frame_x1) <= 12.0
+    if segment.length_pt > max(260.0, frame_w * 1.15) and seg_h <= max(18.0, frame_h * 0.12) and (near_bottom or near_top):
+        reasons.append("frame_edge_long_aux")
+    elif segment.length_pt > max(180.0, frame_h * 1.7) and seg_w <= max(18.0, frame_w * 0.08) and (near_left or near_right):
+        reasons.append("frame_edge_long_aux")
+    return reasons
+
+
+def mark_parallel_aux_duplicates(segments: list[RouteSegment]) -> None:
+    walk_sub = [segment for segment in segments if segment.style_class == "walk_sub"]
+    for index, left in enumerate(walk_sub):
+        left_x0, left_y0, left_x1, left_y1 = left.bbox
+        left_w = left_x1 - left_x0
+        left_h = left_y1 - left_y0
+        if left.length_pt < 250 or left_h > 20:
+            continue
+        for right in walk_sub[index + 1 :]:
+            right_x0, right_y0, right_x1, right_y1 = right.bbox
+            right_w = right_x1 - right_x0
+            right_h = right_y1 - right_y0
+            if right.length_pt < 250 or right_h > 20:
+                continue
+            overlap_w = max(0.0, min(left_x1, right_x1) - max(left_x0, right_x0))
+            if overlap_w < min(left_w, right_w) * 0.7:
+                continue
+            center_y_gap = abs(((left_y0 + left_y1) / 2.0) - ((right_y0 + right_y1) / 2.0))
+            if center_y_gap > 4.0:
+                continue
+            for segment in (left, right):
+                if "parallel_aux_duplicate" not in segment.review_reasons:
+                    segment.review_reasons.append("parallel_aux_duplicate")
+                    segment.needs_manual_review = True
+                    segment.confidence = max(0.0, segment.confidence - 0.16)
+
+
 def endpoint_vector(points: list[tuple[float, float]]) -> tuple[float, float]:
     if len(points) < 2:
         return (0.0, 0.0)
@@ -458,6 +512,12 @@ def component_confidence(segments: list[RouteSegment], branch_node_count: int, c
     if any(segment.needs_manual_review for segment in segments):
         reasons.append("contains_low_confidence_segment")
         confidence -= 0.06
+    if any("frame_edge_long_aux" in segment.review_reasons for segment in segments):
+        reasons.append("frame_assignment_error")
+        confidence -= 0.12
+    if any("parallel_aux_duplicate" in segment.review_reasons for segment in segments):
+        reasons.append("extra_segment")
+        confidence -= 0.10
     return max(0.0, min(confidence, 0.98)), reasons
 
 
@@ -504,6 +564,34 @@ def write_manual_review_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def load_raw_segments_geojson(path: Path) -> list[RouteSegment]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    segments: list[RouteSegment] = []
+    for feature in data["features"]:
+        props = feature["properties"]
+        coords = feature["geometry"]["coordinates"]
+        points_pdf = [(float(coord[0]) / MAPBOX_SCALE, -float(coord[1]) / MAPBOX_SCALE) for coord in coords]
+        segments.append(
+            RouteSegment(
+                segment_id=props["segment_id"],
+                page_no=int(props["page_no"]),
+                frame_id=props.get("frame_id") or None,
+                draw_index=0,
+                polyline_index=0,
+                style_class=props["style_class"],
+                classification=props["classification"],
+                width_pt=float(props["width_pt"]),
+                dashes=str(props["dashes"]),
+                points_pdf=points_pdf,
+                length_pt=float(props["length_pt"]),
+                confidence=float(props["confidence"]),
+                needs_manual_review=bool(props.get("needs_manual_review")),
+                review_reasons=[reason for reason in str(props.get("review_reasons") or "").split(",") if reason],
+            )
+        )
+    return segments
 
 
 def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
@@ -884,7 +972,7 @@ def build_html(debug_dir: Path, config: dict[str, Any]) -> None:
     (debug_dir / "index.html").write_text(html, encoding="utf-8")
 
 
-def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) -> dict[str, Any]:
+def build_step3(pdf_path: Path | None, step2_dir: Path, out_dir: Path, env_path: Path, raw_segments_path: Path | None = None) -> dict[str, Any]:
     ensure_dir(out_dir)
     preview_dir = out_dir / "pages"
     ensure_dir(preview_dir)
@@ -892,13 +980,8 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
     ensure_dir(debug_dir)
     ensure_dir(debug_dir / "pages")
 
-    route_rows = load_route_rows(step2_dir)
     frames = load_frames(step2_dir / "frames.csv")
     frame_source_by_id = {frame_id: row.get("source_kind") for frame_id, row in frames.items()}
-
-    doc = fitz.open(pdf_path)
-    page_drawings: dict[int, list[Any]] = {}
-    page_meta: dict[int, dict[str, Any]] = {}
     raw_segments: list[RouteSegment] = []
     manual_review_rows: list[dict[str, Any]] = []
     issue_index = 1
@@ -927,60 +1010,99 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
         )
         issue_index += 1
 
-    segment_counter = 1
-    for row in route_rows:
-        page_no = row["page_no"]
-        if page_no not in page_drawings:
-            page = doc.load_page(page_no - 1)
-            page_drawings[page_no] = page.get_drawings()
-            page_meta[page_no] = {"width_pt": float(page.rect.width), "height_pt": float(page.rect.height)}
-        drawing = page_drawings[page_no][row["draw_index"]]
-        polylines = polylines_from_items(drawing.get("items", []))
-        if not polylines:
-            continue
-        for polyline_index, points in enumerate(polylines):
-            if len(points) < 2:
+    if raw_segments_path and raw_segments_path.exists():
+        raw_segments = load_raw_segments_geojson(raw_segments_path)
+    else:
+        if pdf_path is None:
+            raise SystemExit("PDF が必要です。--raw-segments を指定するか PDF パスを渡してください。")
+        route_rows = load_route_rows(step2_dir)
+        doc = fitz.open(pdf_path)
+        page_drawings: dict[int, list[Any]] = {}
+        segment_counter = 1
+        for row in route_rows:
+            page_no = row["page_no"]
+            if page_no not in page_drawings:
+                page = doc.load_page(page_no - 1)
+                page_drawings[page_no] = page.get_drawings()
+            drawing = page_drawings[page_no][row["draw_index"]]
+            polylines = polylines_from_items(drawing.get("items", []))
+            if not polylines:
                 continue
-            length_pt = polyline_length(points)
-            if length_pt < 4.0:
-                continue
-            confidence, confidence_reasons = segment_confidence(row, length_pt)
-            style_class = style_class_from_row(row)
-            review_reasons = list(confidence_reasons)
-            if confidence < 0.58:
-                review_reasons.append("low_confidence")
-            segment = RouteSegment(
-                segment_id=f"seg_{segment_counter:06d}",
-                page_no=page_no,
-                frame_id=row.get("frame_id") or None,
-                draw_index=row["draw_index"],
-                polyline_index=polyline_index,
-                style_class=style_class,
-                classification=row["classification"],
-                width_pt=row["width_pt"],
-                dashes=row["dashes"],
-                points_pdf=points,
-                length_pt=length_pt,
-                confidence=confidence,
-                needs_manual_review=bool(review_reasons),
-                review_reasons=review_reasons,
-            )
-            raw_segments.append(segment)
-            segment_counter += 1
-            for reason in review_reasons:
-                add_issue(
-                    object_type="segment",
-                    object_id=segment.segment_id,
-                    page_no=segment.page_no,
-                    frame_id=segment.frame_id,
-                    severity="warning" if reason != "missing_frame_id" else "error",
-                    reason=reason,
-                    details=f"length_pt={segment.length_pt:.2f}, width_pt={segment.width_pt:.2f}, dash={segment.dashes}",
+            for polyline_index, points in enumerate(polylines):
+                if len(points) < 2:
+                    continue
+                length_pt = polyline_length(points)
+                if length_pt < 4.0:
+                    continue
+                confidence, confidence_reasons = segment_confidence(row, length_pt)
+                style_class = style_class_from_row(row)
+                review_reasons = list(confidence_reasons)
+                if confidence < 0.58:
+                    review_reasons.append("low_confidence")
+                segment = RouteSegment(
+                    segment_id=f"seg_{segment_counter:06d}",
+                    page_no=page_no,
+                    frame_id=row.get("frame_id") or None,
+                    draw_index=row["draw_index"],
+                    polyline_index=polyline_index,
+                    style_class=style_class,
+                    classification=row["classification"],
+                    width_pt=row["width_pt"],
+                    dashes=row["dashes"],
+                    points_pdf=points,
+                    length_pt=length_pt,
+                    confidence=confidence,
+                    needs_manual_review=bool(review_reasons),
+                    review_reasons=review_reasons,
                 )
+                raw_segments.append(segment)
+                segment_counter += 1
+        if pdf_path is not None:
+            doc.close()
+
+    for segment in raw_segments:
+        frame_row = frames.get(segment.frame_id) if segment.frame_id else None
+        geometry_reasons = segment_geometry_review_reasons(segment, frame_row)
+        for reason in geometry_reasons:
+            if reason not in segment.review_reasons:
+                segment.review_reasons.append(reason)
+                segment.needs_manual_review = True
+                segment.confidence = max(0.0, segment.confidence - 0.18)
+        if segment.confidence < 0.58 and "low_confidence" not in segment.review_reasons:
+            segment.review_reasons.append("low_confidence")
+            segment.needs_manual_review = True
+        for reason in segment.review_reasons:
+            add_issue(
+                object_type="segment",
+                object_id=segment.segment_id,
+                page_no=segment.page_no,
+                frame_id=segment.frame_id,
+                severity="warning" if reason != "missing_frame_id" else "error",
+                reason=reason,
+                details=f"length_pt={segment.length_pt:.2f}, width_pt={segment.width_pt:.2f}, dash={segment.dashes}",
+            )
 
     raw_by_group: dict[tuple[int, str | None], list[RouteSegment]] = defaultdict(list)
     for segment in raw_segments:
         raw_by_group[(segment.page_no, segment.frame_id)].append(segment)
+    for segments in raw_by_group.values():
+        mark_parallel_aux_duplicates(segments)
+    existing_issue_keys = {(row["object_type"], row["object_id"], row["reason"]) for row in manual_review_rows}
+    for segment in raw_segments:
+        for reason in segment.review_reasons:
+            key = ("segment", segment.segment_id, reason)
+            if key in existing_issue_keys:
+                continue
+            add_issue(
+                object_type="segment",
+                object_id=segment.segment_id,
+                page_no=segment.page_no,
+                frame_id=segment.frame_id,
+                severity="warning",
+                reason=reason,
+                details=f"length_pt={segment.length_pt:.2f}, width_pt={segment.width_pt:.2f}, dash={segment.dashes}",
+            )
+            existing_issue_keys.add(key)
 
     merged_routes: list[MergedRoute] = []
     route_counter_by_page: Counter[int] = Counter()
@@ -1063,6 +1185,7 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
         }
         raw_features.append(make_geojson_feature(geometry, properties))
 
+    source_pdf_name = pdf_path.name if pdf_path is not None else "unknown_pdf"
     merged_features: list[dict[str, Any]] = []
     for route in merged_routes:
         if len(route.chains_pdf) == 1:
@@ -1075,6 +1198,7 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
             "frame_id": route.frame_id,
             "frame_source_kind": route.frame_source_kind,
             "style_class": route.style_class,
+            "segment_ids": "|".join(route.segment_ids),
             "segment_count": route.segment_count,
             "chain_count": route.chain_count,
             "branch_node_count": route.branch_node_count,
@@ -1082,19 +1206,24 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
             "needs_manual_review": route.needs_manual_review,
             "review_reasons": ",".join(route.review_reasons),
             "coordinate_space": "pdf_debug_local",
-            "source_pdf": pdf_path.name,
+            "source_pdf": source_pdf_name,
         }
         merged_features.append(make_geojson_feature(geometry, properties))
 
     route_pages = sorted({route.page_no for route in merged_routes} | {segment.page_no for segment in raw_segments if segment.frame_id})
     page_manifest: list[dict[str, Any]] = []
-    for page_no in route_pages:
-        page = doc.load_page(page_no - 1)
-        image_name = f"page_{page_no:03d}.png"
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.25, 1.25), alpha=False)
-        image_path = debug_dir / "pages" / image_name
-        pix.save(image_path)
-        page_manifest.append(page_image_manifest_entry(page_no, page.rect, image_name))
+    if pdf_path is not None:
+        doc = fitz.open(pdf_path)
+        for page_no in route_pages:
+            page = doc.load_page(page_no - 1)
+            image_name = f"page_{page_no:03d}.png"
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.25, 1.25), alpha=False)
+            image_path = debug_dir / "pages" / image_name
+            pix.save(image_path)
+            page_manifest.append(page_image_manifest_entry(page_no, page.rect, image_name))
+        doc.close()
+    elif (debug_dir / "page_manifest.json").exists():
+        page_manifest = json.loads((debug_dir / "page_manifest.json").read_text(encoding="utf-8"))
 
     raw_geojson_path = out_dir / "raw_segments.geojson"
     merged_geojson_path = out_dir / "merged_routes.geojson"
@@ -1121,10 +1250,11 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
     )
 
     issue_counter = Counter(row["reason"] for row in manual_review_rows)
+    report_pdf_label = pdf_path.name if pdf_path is not None else f"reused:{raw_segments_path.name if raw_segments_path else 'raw_segments'}"
     report_lines = [
         "# Step 3 Report",
         "",
-        f"- PDF: `{pdf_path.name}`",
+        f"- PDF: `{report_pdf_label}`",
         f"- Raw route segments: `{len(raw_segments)}`",
         f"- Merged routes: `{len(merged_routes)}`",
         f"- Manual review issues: `{len(manual_review_rows)}`",
@@ -1150,7 +1280,7 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
     report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
 
     result = {
-        "pdf_path": str(pdf_path),
+        "pdf_path": "" if pdf_path is None else str(pdf_path),
         "raw_segment_count": len(raw_segments),
         "merged_route_count": len(merged_routes),
         "manual_review_count": len(manual_review_rows),
@@ -1170,8 +1300,9 @@ def build_step3(pdf_path: Path, step2_dir: Path, out_dir: Path, env_path: Path) 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vectorize route candidates into raw and merged GeoJSON with Mapbox debug output.")
-    parser.add_argument("pdf", type=Path, help="Path to the target PDF")
+    parser.add_argument("pdf", type=Path, nargs="?", help="Path to the target PDF")
     parser.add_argument("--step2-dir", type=Path, default=Path("artifacts/step2"), help="Directory containing Step 2 outputs")
+    parser.add_argument("--raw-segments", type=Path, default=None, help="Optional existing raw_segments.geojson to rebuild merged output without the PDF")
     parser.add_argument("--out-dir", type=Path, default=Path("artifacts/step3"), help="Output directory")
     parser.add_argument("--env-file", type=Path, default=Path(".env"), help="Environment file used to inject an optional Mapbox token")
     return parser.parse_args()
@@ -1184,6 +1315,7 @@ def main() -> int:
         step2_dir=args.step2_dir,
         out_dir=args.out_dir,
         env_path=args.env_file,
+        raw_segments_path=args.raw_segments,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, default=lambda value: dict(value)))
     return 0

@@ -9,13 +9,16 @@ from pathlib import Path
 from typing import Any
 
 import fitz
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
 
 
 MAPBOX_SCALE = 0.01
 FULL_SCALE = 1.25
 FRAME_MARGIN_PT = 12.0
 RED_RATIO_OK = 0.55
+ROUTE_BUFFER_PX = 6
+RED_DILATE_SIZE = 5
+ROUTE_DILATE_SIZE = 7
 
 
 def ensure_dir(path: Path) -> None:
@@ -116,6 +119,13 @@ def route_pdf_points(feature: dict[str, Any]) -> list[list[tuple[float, float]]]
     return [[synthetic_to_pdf(coord) for coord in line] for line in geom["coordinates"]]
 
 
+def route_bbox_pdf(feature: dict[str, Any]) -> tuple[float, float, float, float]:
+    points = [point for line in route_pdf_points(feature) for point in line]
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def draw_route_overlay(
     image: Image.Image,
     routes: list[dict[str, Any]],
@@ -193,6 +203,90 @@ def red_pixel_ratio(image: Image.Image, pdf_points: list[tuple[float, float]], p
     return hits / total if total else 0.0
 
 
+def create_red_mask(image: Image.Image) -> Image.Image:
+    rgb = image.convert("RGB")
+    mask = Image.new("L", rgb.size, 0)
+    px = rgb.load()
+    out = mask.load()
+    for y in range(rgb.height):
+        for x in range(rgb.width):
+            r, g, b = px[x, y]
+            if r >= 140 and (r - g) >= 30 and (r - b) >= 30:
+                out[x, y] = 255
+    return mask
+
+
+def dilate_mask(mask: Image.Image, size: int) -> Image.Image:
+    if size <= 1:
+        return mask
+    return mask.filter(ImageFilter.MaxFilter(size=size))
+
+
+def route_mask_for_feature(
+    feature: dict[str, Any],
+    image_size: tuple[int, int],
+    page_width_pt: float,
+    page_height_pt: float,
+    *,
+    line_width_px: int = ROUTE_BUFFER_PX,
+) -> Image.Image:
+    mask = Image.new("L", image_size, 0)
+    draw = ImageDraw.Draw(mask)
+    for line in route_pdf_points(feature):
+        pixels = [pdf_to_pixel(point, page_width_pt, page_height_pt, Image.new("RGB", image_size)) for point in line]
+        if len(pixels) >= 2:
+            draw.line(pixels, fill=255, width=line_width_px, joint="curve")
+        elif pixels:
+            x, y = pixels[0]
+            draw.ellipse((x - line_width_px, y - line_width_px, x + line_width_px, y + line_width_px), fill=255)
+    return mask
+
+
+def mask_bbox(mask: Image.Image) -> tuple[int, int, int, int] | None:
+    bbox = mask.getbbox()
+    return bbox if bbox else None
+
+
+def crop_with_margin(image: Image.Image, bbox: tuple[int, int, int, int], margin: int = 24) -> tuple[Image.Image, tuple[int, int]]:
+    x0 = max(0, bbox[0] - margin)
+    y0 = max(0, bbox[1] - margin)
+    x1 = min(image.width, bbox[2] + margin)
+    y1 = min(image.height, bbox[3] + margin)
+    return image.crop((x0, y0, x1, y1)), (x0, y0)
+
+
+def mask_metrics(red_mask: Image.Image, route_mask: Image.Image) -> dict[str, float]:
+    red = red_mask.load()
+    route = route_mask.load()
+    width, height = red_mask.size
+    inter = 0
+    route_area = 0
+    red_area = 0
+    for y in range(height):
+        for x in range(width):
+            r = 1 if red[x, y] > 0 else 0
+            q = 1 if route[x, y] > 0 else 0
+            if r:
+                red_area += 1
+            if q:
+                route_area += 1
+            if r and q:
+                inter += 1
+    union = red_area + route_area - inter
+    precision = inter / route_area if route_area else 0.0
+    recall = inter / red_area if red_area else 0.0
+    iou = inter / union if union else 0.0
+    return {
+        "intersection": float(inter),
+        "route_area": float(route_area),
+        "red_area": float(red_area),
+        "precision": precision,
+        "recall": recall,
+        "iou": iou,
+        "mask_overlap_ratio": precision,
+    }
+
+
 def percentile(values: list[float], ratio: float) -> float:
     if not values:
         return 0.0
@@ -213,6 +307,8 @@ def load_road_eval_rows(base_dir: Path) -> tuple[dict[str, dict[str, Any]], dict
 
 def recommended_action(
     extraction_status: str,
+    step3_problem_type: str,
+    mask_overlap_ratio: float,
     likely_issue: str,
     mean_dist: float,
     p90_dist: float,
@@ -222,6 +318,16 @@ def recommended_action(
     gcp_pass: bool,
 ) -> str:
     if extraction_status == "extraction_issue":
+        if step3_problem_type == "correct_extraction_but_georef_or_osm_issue" and mask_overlap_ratio >= 0.16:
+            if likely_issue == "mixed_alignment_or_missing_path":
+                return "osm_missing_or_trail"
+            if likely_issue == "likely_georef_misalignment":
+                return "manual_edit_needed"
+            if p90_dist < 60 and snap_ratio >= 0.7:
+                return "map_match_candidate"
+            return "manual_edit_needed"
+        if step3_problem_type in {"extra_segment", "frame_assignment_error", "legend_or_label_noise"}:
+            return "manual_edit_needed"
         return "extraction_fix_needed"
     if not gcp_pass and max_dist > 80:
         return "georef_gcp_recheck"
@@ -236,6 +342,54 @@ def recommended_action(
     if likely_issue == "likely_georef_misalignment" and gcp_pass:
         return "manual_edit_needed"
     return "manual_edit_needed"
+
+
+def classify_step3_problem(
+    *,
+    extraction_status: str,
+    precision: float,
+    recall: float,
+    iou: float,
+    style_class: str,
+    likely_issue: str,
+    route_props: dict[str, Any],
+    failed_ratio: float,
+    snap_ratio: float,
+    frame_bbox_pt: tuple[float, float, float, float],
+    route_bbox_pt: tuple[float, float, float, float],
+) -> str:
+    if extraction_status == "extraction_ok":
+        return "correct_extraction_but_georef_or_osm_issue"
+    branch_count = int(route_props.get("branch_node_count") or 0)
+    chain_count = int(route_props.get("chain_count") or 0)
+    if branch_count > 0:
+        return "wrong_merge"
+    if chain_count > 1:
+        return "broken_chain"
+    frame_x0, frame_y0, frame_x1, frame_y1 = frame_bbox_pt
+    rx0, ry0, rx1, ry1 = route_bbox_pt
+    frame_w = frame_x1 - frame_x0
+    frame_h = frame_y1 - frame_y0
+    route_w = rx1 - rx0
+    route_h = ry1 - ry0
+    near_bottom = abs(route_bbox_pt[3] - frame_y1) <= 18.0
+    spans_wide = route_w >= frame_w * 0.72
+    flat = route_h <= max(12.0, frame_h * 0.08)
+    if style_class == "walk_sub" and near_bottom and spans_wide and flat:
+        return "frame_assignment_error"
+    if style_class == "walk_sub" and precision < 0.16 and recall < 0.08:
+        return "legend_or_label_noise"
+    if precision < 0.18 and recall >= 0.18:
+        return "extra_segment"
+    if recall < 0.15 and precision >= 0.22:
+        return "missing_segment"
+    if likely_issue == "mixed_alignment_or_missing_path" and snap_ratio < 0.65:
+        return "correct_extraction_but_georef_or_osm_issue"
+    if likely_issue == "likely_georef_misalignment" and failed_ratio > 0.05:
+        return "correct_extraction_but_georef_or_osm_issue"
+    if style_class == "walk_sub" and route_w < 40 and route_h < 20:
+        return "wrong_style_class"
+    return "wrong_merge" if iou < 0.08 else "correct_extraction_but_georef_or_osm_issue"
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -297,6 +451,7 @@ def write_report(
             "## Outputs",
             "- `pdf_overlay_full.png`",
             "- `pdf_overlay_frame.png`",
+            "- `routes/route_061_xxxx.png`",
             "- `route_diagnosis.csv`",
         ]
     )
@@ -360,14 +515,35 @@ def main() -> None:
     gcp_pass = bool(frame_model and frame_model.get("quality_status") == "pass")
 
     diagnosis_rows: list[dict[str, Any]] = []
+    routes_dir = args.out_dir / "routes"
+    ensure_dir(routes_dir)
+    red_mask_full = dilate_mask(create_red_mask(source_image), RED_DILATE_SIZE)
     extraction_issue_count = 0
     for feature in routes:
         route_id = feature["properties"]["route_id"]
-        style_class = feature["properties"].get("style_class", "")
+        route_props = feature["properties"]
+        style_class = route_props.get("style_class", "")
         pdf_lines = route_pdf_points(feature)
         flat_points = [point for line in pdf_lines for point in line]
         red_ratio = red_pixel_ratio(source_image, flat_points, page_width_pt, page_height_pt)
-        extraction_status = "extraction_ok" if red_ratio >= RED_RATIO_OK else "extraction_issue"
+        route_mask = dilate_mask(
+            route_mask_for_feature(feature, source_image.size, page_width_pt, page_height_pt, line_width_px=ROUTE_BUFFER_PX),
+            ROUTE_DILATE_SIZE,
+        )
+        route_bbox = mask_bbox(route_mask)
+        if route_bbox is None:
+            metrics = {"precision": 0.0, "recall": 0.0, "iou": 0.0, "mask_overlap_ratio": 0.0}
+            route_crop_origin = (0, 0)
+            route_crop_image = source_image.copy()
+        else:
+            route_crop_image, route_crop_origin = crop_with_margin(source_image, route_bbox, margin=28)
+            red_crop, _ = crop_with_margin(red_mask_full, route_bbox, margin=28)
+            route_crop_mask, _ = crop_with_margin(route_mask, route_bbox, margin=28)
+            metrics = mask_metrics(red_crop, route_crop_mask)
+        extraction_status = "extraction_ok" if (
+            metrics["mask_overlap_ratio"] >= 0.24
+            and (metrics["precision"] >= 0.20 or metrics["recall"] >= 0.14 or metrics["iou"] >= 0.10 or red_ratio >= RED_RATIO_OK)
+        ) else "extraction_issue"
         if extraction_status == "extraction_issue":
             extraction_issue_count += 1
 
@@ -382,8 +558,24 @@ def main() -> None:
         failed_ratio = (failed_count / len(sample_rows)) if sample_rows else 0.0
         snap_ratio = float(road_summary.get("snap_ratio", 0.0) or 0.0)
         likely_issue = road_summary.get("likely_issue", "")
+        route_bbox_pt = route_bbox_pdf(feature)
+        step3_problem_type = classify_step3_problem(
+            extraction_status=extraction_status,
+            precision=metrics["precision"],
+            recall=metrics["recall"],
+            iou=metrics["iou"],
+            style_class=style_class,
+            likely_issue=likely_issue,
+            route_props=route_props,
+            failed_ratio=failed_ratio,
+            snap_ratio=snap_ratio,
+            frame_bbox_pt=frame_bbox_pt,
+            route_bbox_pt=route_bbox_pt,
+        )
         action = recommended_action(
             extraction_status,
+            step3_problem_type,
+            metrics["mask_overlap_ratio"],
             likely_issue,
             mean_dist,
             p90_dist,
@@ -392,11 +584,26 @@ def main() -> None:
             snap_ratio,
             gcp_pass,
         )
+        route_overlay = draw_route_overlay(
+            route_crop_image,
+            [feature],
+            page_width_pt,
+            page_height_pt,
+            frame_bbox_pt,
+            crop_origin_px=route_crop_origin,
+        )
+        route_overlay.save(routes_dir / f"{route_id}.png")
         diagnosis_rows.append(
             {
                 "route_id": route_id,
                 "style_class": style_class,
                 "pdf_extraction_status": extraction_status,
+                "step3_problem_type": step3_problem_type,
+                "mask_overlap_ratio": round(metrics["mask_overlap_ratio"], 4),
+                "mask_precision": round(metrics["precision"], 4),
+                "mask_recall": round(metrics["recall"], 4),
+                "mask_iou": round(metrics["iou"], 4),
+                "red_pixel_ratio": round(red_ratio, 4),
                 "mean_road_dist_m": round(mean_dist, 3),
                 "p90_road_dist_m": round(p90_dist, 3),
                 "max_road_dist_m": round(max_dist, 3),
@@ -412,7 +619,7 @@ def main() -> None:
 
     cause_counts: dict[str, int] = {}
     for row in diagnosis_rows:
-        key = row["recommended_action"]
+        key = row["step3_problem_type"]
         cause_counts[key] = cause_counts.get(key, 0) + 1
     dominant_cause = max(cause_counts, key=cause_counts.get) if cause_counts else "unknown"
     extraction_summary = {
