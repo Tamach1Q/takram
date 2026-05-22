@@ -449,6 +449,42 @@ def corners_dict_to_points(corners: dict[str, list[float]] | None) -> list[tuple
     return points
 
 
+def serializable_manual_geo_points(data: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not data:
+        return []
+    points: list[dict[str, Any]] = []
+    for index, row in enumerate(data.get("gcps", []), start=1):
+        if row.get("longitude") in (None, "") or row.get("latitude") in (None, ""):
+            continue
+        points.append(
+            {
+                "index": index,
+                "name": row.get("name") or row.get("role") or f"manual_{index}",
+                "role": row.get("role", ""),
+                "longitude": round(float(row["longitude"]), 7),
+                "latitude": round(float(row["latitude"]), 7),
+            }
+        )
+    return points
+
+
+def serializable_auto_geo_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        if row.get("longitude") in (None, "") or row.get("latitude") in (None, ""):
+            continue
+        points.append(
+            {
+                "index": index,
+                "name": row.get("source_name_text") or row.get("gazetteer_name_short") or row.get("gcp_id") or f"auto_{index}",
+                "role": row.get("source_kind", ""),
+                "longitude": round(float(row["longitude"]), 7),
+                "latitude": round(float(row["latitude"]), 7),
+            }
+        )
+    return points
+
+
 def build_html(config: dict[str, Any]) -> str:
     template = """<!doctype html>
 <html lang="ja">
@@ -459,47 +495,75 @@ def build_html(config: dict[str, Any]) -> str:
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
   <style>
     :root {
-      --bg: #f5f4ef;
+      --bg: #f5f3ee;
       --surface: #ffffff;
-      --border: #d6d3d1;
+      --border: #d7d2c8;
       --text: #111827;
       --muted: #4b5563;
       --accent: #b91c1c;
       --accent-2: #1d4ed8;
-      --ok: #166534;
-      --warn: #92400e;
+      --accent-3: #f59e0b;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text); background: var(--bg); }
-    #app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    #app {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      height: 100%;
+      min-height: 0;
+    }
     #toolbar {
       display: grid;
-      grid-template-columns: 260px 170px 1fr auto auto auto auto auto;
-      gap: 10px;
+      grid-template-columns: auto minmax(260px, 340px) auto auto auto auto auto auto;
+      gap: 8px;
       align-items: center;
-      padding: 12px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.94);
+      background: rgba(255,255,255,0.92);
     }
     #statusbar {
       display: grid;
-      grid-template-columns: 1fr auto auto;
-      gap: 10px;
+      grid-template-columns: minmax(260px, 1fr) auto auto;
+      gap: 12px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.88);
       align-items: center;
     }
     select, button {
       font: inherit;
-      min-height: 38px;
+      min-height: 34px;
       border-radius: 10px;
       border: 1px solid rgba(15,23,42,0.14);
       background: white;
-      padding: 8px 10px;
+      padding: 6px 10px;
     }
     button { cursor: pointer; }
     button.primary { background: var(--accent); color: white; border-color: transparent; }
+    .toolbarLabel {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    #frameCount {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(15,23,42,0.1);
+      background: rgba(255,255,255,0.9);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
     #stepText {
       font-weight: 800;
       font-size: 18px;
@@ -513,7 +577,7 @@ def build_html(config: dict[str, Any]) -> str:
     #metrics strong { color: var(--text); }
     #workspace {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 45fr 55fr;
       min-height: 0;
     }
     .pane {
@@ -521,34 +585,51 @@ def build_html(config: dict[str, Any]) -> str:
       min-width: 0;
       min-height: 0;
       border-right: 1px solid var(--border);
-      background: #fff;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(247,244,239,0.98) 100%);
     }
     .pane:last-child { border-right: 0; }
-    .paneTitle {
+    .paneHeader {
       position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 5;
-      background: rgba(255,255,255,0.96);
-      border: 1px solid rgba(15,23,42,0.1);
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.72) 100%);
+      border-bottom: 1px solid rgba(15,23,42,0.08);
+      backdrop-filter: blur(4px);
+    }
+    .paneTitle {
+      font-size: 13px;
       font-weight: 800;
       letter-spacing: 0.04em;
+    }
+    .paneControls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
     #pdfCanvas {
       position: absolute;
       inset: 0;
       cursor: crosshair;
+      touch-action: none;
     }
     #map {
       position: absolute;
       inset: 0;
     }
+    .subtleButton {
+      background: rgba(255,255,255,0.92);
+    }
     #rightError {
       position: absolute;
-      top: 50px;
+      top: 58px;
       left: 12px;
       right: 12px;
       z-index: 6;
@@ -565,7 +646,7 @@ def build_html(config: dict[str, Any]) -> str:
       bottom: 12px;
       z-index: 6;
       width: min(420px, calc(100% - 24px));
-      max-height: 40%;
+      max-height: 38%;
       overflow: auto;
       background: rgba(15,23,42,0.9);
       color: #e2e8f0;
@@ -575,7 +656,51 @@ def build_html(config: dict[str, Any]) -> str:
       line-height: 1.45;
       margin: 0;
     }
-    @media (max-width: 1100px) {
+    #pdfError {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      z-index: 6;
+      background: rgba(127,29,29,0.92);
+      color: white;
+      padding: 10px 12px;
+      border-radius: 12px;
+      display: none;
+      white-space: pre-wrap;
+      font-size: 12px;
+    }
+    details#advancedPanel {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 6;
+      width: min(320px, calc(100% - 24px));
+      background: rgba(255,255,255,0.94);
+      border: 1px solid rgba(15,23,42,0.12);
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    details#advancedPanel summary {
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .advancedRow {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .advancedRow select {
+      min-width: 160px;
+    }
+    .advancedNote {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    @media (max-width: 1200px) {
       #toolbar {
         grid-template-columns: 1fr 1fr;
       }
@@ -594,17 +719,15 @@ def build_html(config: dict[str, Any]) -> str:
 <body>
   <div id="app">
     <div id="toolbar">
+      <div class="toolbarLabel">Frame</div>
       <select id="frameSelect"></select>
-      <select id="modeSelect">
-        <option value="similarity">2点合わせ</option>
-        <option value="projective">4点合わせ</option>
-      </select>
-      <div></div>
+      <div id="frameCount"></div>
       <button id="undoButton">Undo</button>
       <button id="clearButton">Clear</button>
       <button id="previewButton">Preview</button>
       <button id="saveButton" class="primary">Save</button>
       <button id="nextButton">Next Frame</button>
+      <div></div>
     </div>
     <div id="statusbar">
       <div id="stepText">次: 左の PDF をクリックしてください</div>
@@ -613,13 +736,40 @@ def build_html(config: dict[str, Any]) -> str:
     </div>
     <div id="workspace">
       <section class="pane">
-        <div class="paneTitle">PDF</div>
+        <div class="paneHeader">
+          <div class="paneTitle">PDF</div>
+          <div class="paneControls">
+            <select id="pdfDisplaySelect">
+              <option value="both">両方</option>
+              <option value="map">元地図</option>
+              <option value="redlines">赤線のみ</option>
+            </select>
+            <button id="fitPdfButton" class="subtleButton">Fit PDF</button>
+          </div>
+        </div>
         <canvas id="pdfCanvas"></canvas>
+        <div id="pdfError"></div>
       </section>
       <section class="pane">
-        <div class="paneTitle">Mapbox</div>
+        <div class="paneHeader">
+          <div class="paneTitle">Mapbox</div>
+          <div class="paneControls">
+            <span class="toolbarLabel">既定: 2点 similarity</span>
+          </div>
+        </div>
         <div id="map"></div>
         <div id="rightError"></div>
+        <details id="advancedPanel">
+          <summary>Advanced</summary>
+          <div class="advancedRow">
+            <label for="transformSelect">Preview transform</label>
+            <select id="transformSelect">
+              <option value="similarity">Similarity</option>
+              <option value="projective">Projective (4点以上)</option>
+            </select>
+          </div>
+          <div class="advancedNote">画像overlayのドラッグ移動・回転・四隅ハンドルは一旦外しています。必要ならここに再追加します。</div>
+        </details>
         <pre id="jsonPreview"></pre>
       </section>
     </div>
@@ -633,19 +783,23 @@ def build_html(config: dict[str, Any]) -> str:
     const config = window.__OVERLAY_GEOREF_CONFIG__;
     const MAPBOX_SCALE = 0.01;
     const EARTH_RADIUS_M = 6378137.0;
-    const paneIds = { pdf: 'pdf', map: 'map' };
+    const PDF_INITIAL_FILL_RATIO = 0.82;
     const ui = {
       frameSelect: document.getElementById('frameSelect'),
-      modeSelect: document.getElementById('modeSelect'),
+      frameCount: document.getElementById('frameCount'),
       undoButton: document.getElementById('undoButton'),
       clearButton: document.getElementById('clearButton'),
       previewButton: document.getElementById('previewButton'),
       saveButton: document.getElementById('saveButton'),
       nextButton: document.getElementById('nextButton'),
+      pdfDisplaySelect: document.getElementById('pdfDisplaySelect'),
+      fitPdfButton: document.getElementById('fitPdfButton'),
+      transformSelect: document.getElementById('transformSelect'),
       stepText: document.getElementById('stepText'),
       metrics: document.getElementById('metrics'),
       notice: document.getElementById('notice'),
       pdfCanvas: document.getElementById('pdfCanvas'),
+      pdfError: document.getElementById('pdfError'),
       rightError: document.getElementById('rightError'),
       jsonPreview: document.getElementById('jsonPreview'),
     };
@@ -658,6 +812,20 @@ def build_html(config: dict[str, Any]) -> str:
 
     function clamp(value, low, high) {
       return Math.max(low, Math.min(high, value));
+    }
+
+    function currentTransformChoice() {
+      return ui.transformSelect.value;
+    }
+
+    function clearPdfError() {
+      ui.pdfError.style.display = 'none';
+      ui.pdfError.textContent = '';
+    }
+
+    function showPdfError(message) {
+      ui.pdfError.style.display = 'block';
+      ui.pdfError.textContent = message;
     }
 
     function showRightError(message) {
@@ -695,27 +863,6 @@ def build_html(config: dict[str, Any]) -> str:
       return config.frames.find((frame) => frame.frame_id === frameId) || null;
     }
 
-    function requiredPoints() {
-      return ui.modeSelect.value === 'projective' ? 4 : 2;
-    }
-
-    function currentTransformType() {
-      return ui.modeSelect.value;
-    }
-
-    function populateFrameSelect() {
-      const frames = sortedFrames();
-      ui.frameSelect.innerHTML = '';
-      for (const frame of frames) {
-        const option = document.createElement('option');
-        option.value = frame.frame_id;
-        option.textContent = `${frame.page_no} / ${frame.frame_id} / score=${Number(frame.priority_score || 0).toFixed(1)}`;
-        ui.frameSelect.appendChild(option);
-      }
-      currentFrameId = config.default_frame_id || frames[0].frame_id;
-      ui.frameSelect.value = currentFrameId;
-    }
-
     function getState(frame) {
       if (!frameState.has(frame.frame_id)) {
         frameState.set(frame.frame_id, {
@@ -723,6 +870,13 @@ def build_html(config: dict[str, Any]) -> str:
           preview: null,
           dirty: false,
           notice: frame.has_saved_georef ? '既存 saved georef あり' : '',
+          pdfView: {
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            fitApplied: false,
+          },
+          dragState: null,
         });
       }
       return frameState.get(frame.frame_id);
@@ -733,38 +887,55 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function expectedSide(state) {
-      const needed = requiredPoints();
-      const completed = completedPairs(state);
-      if (completed >= needed) {
-        return 'done';
-      }
       const last = state.controlPoints[state.controlPoints.length - 1];
-      if (!last || (last.pdf_px && last.lonlat)) {
-        return 'pdf';
-      }
+      if (!last || (last.pdf_px && last.lonlat)) return 'pdf';
       return 'map';
+    }
+
+    function populateFrameSelect() {
+      const frames = sortedFrames();
+      ui.frameSelect.innerHTML = '';
+      frames.forEach((frame, index) => {
+        const option = document.createElement('option');
+        option.value = frame.frame_id;
+        option.textContent = `${index + 1}/${frames.length}  ${frame.page_no} / ${frame.frame_id}`;
+        ui.frameSelect.appendChild(option);
+      });
+      currentFrameId = config.default_frame_id || frames[0].frame_id;
+      ui.frameSelect.value = currentFrameId;
+      ui.frameCount.textContent = `${frames.length} 件`;
     }
 
     function updateStepText(frame, state) {
       const side = expectedSide(state);
       const done = completedPairs(state);
-      const needed = requiredPoints();
-      if (side === 'done') {
-        ui.stepText.textContent = `${needed}組の対応点が揃いました。Preview または Save できます`;
-      } else if (side === 'pdf') {
-        ui.stepText.textContent = `次: 左の PDF をクリックしてください (${done + 1}/${needed})`;
+      const nextIndex = done + 1;
+      if (side === 'pdf') {
+        ui.stepText.textContent = `次: 左の PDF をクリックしてください (${nextIndex}点目)`;
       } else {
-        ui.stepText.textContent = `次: 右の Mapbox をクリックしてください (${done + 1}/${needed})`;
+        ui.stepText.textContent = `次: 右の Mapbox をクリックしてください (${nextIndex}点目)`;
       }
-      const rmse = state.preview && Number.isFinite(state.preview.rmse_m) ? `${state.preview.rmse_m.toFixed(2)} m` : '-';
-      ui.metrics.innerHTML = `<strong>mode</strong>: ${currentTransformType()} / <strong>pairs</strong>: ${done}/${needed} / <strong>RMSE</strong>: ${rmse}`;
+
+      const preview = state.preview;
+      const modelBits = [];
+      if (preview && preview.metrics_by_model) {
+        if (Number.isFinite(preview.metrics_by_model.similarity)) {
+          modelBits.push(`sim ${preview.metrics_by_model.similarity.toFixed(2)}m`);
+        }
+        if (Number.isFinite(preview.metrics_by_model.affine)) {
+          modelBits.push(`aff ${preview.metrics_by_model.affine.toFixed(2)}m`);
+        }
+        if (Number.isFinite(preview.metrics_by_model.projective)) {
+          modelBits.push(`proj ${preview.metrics_by_model.projective.toFixed(2)}m`);
+        }
+      }
+      const activeRmse = preview && Number.isFinite(preview.rmse_m) ? `${preview.rmse_m.toFixed(2)} m` : '-';
+      ui.metrics.innerHTML = `<strong>frame</strong>: ${frame.frame_id} / <strong>pairs</strong>: ${done} / <strong>active</strong>: ${preview ? preview.transform_type : 'none'} / <strong>RMSE</strong>: ${activeRmse}${modelBits.length ? ` / <strong>compare</strong>: ${modelBits.join(' | ')}` : ''}`;
       ui.notice.textContent = state.notice || '';
     }
 
     async function loadImage(url) {
-      if (imageCache.has(url)) {
-        return imageCache.get(url);
-      }
+      if (imageCache.has(url)) return imageCache.get(url);
       const promise = new Promise((resolve, reject) => {
         const image = new Image();
         image.onload = () => resolve(image);
@@ -786,16 +957,48 @@ def build_html(config: dict[str, Any]) -> str:
       return rect;
     }
 
-    function fitImageRect(containerWidth, containerHeight, imageWidth, imageHeight) {
-      const scale = Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
-      const width = imageWidth * scale;
-      const height = imageHeight * scale;
+    function fitPdfView(frame, rect, state) {
+      const widthScale = rect.width / frame.image_width_px;
+      const targetHeightScale = (rect.height * PDF_INITIAL_FILL_RATIO) / frame.image_height_px;
+      const baseScale = Math.max(widthScale, targetHeightScale);
+      const scaledWidth = frame.image_width_px * baseScale;
+      const scaledHeight = frame.image_height_px * baseScale;
+      const baseX = (rect.width - scaledWidth) / 2;
+      const baseY = (rect.height - scaledHeight) / 2;
+      state.pdfView.zoom = 1;
+      state.pdfView.panX = baseX;
+      state.pdfView.panY = baseY;
+      state.pdfView.fitApplied = true;
+    }
+
+    function currentPdfLayout(frame, rect, state) {
+      if (!state.pdfView.fitApplied) fitPdfView(frame, rect, state);
+      const widthScale = rect.width / frame.image_width_px;
+      const targetHeightScale = (rect.height * PDF_INITIAL_FILL_RATIO) / frame.image_height_px;
+      const baseScale = Math.max(widthScale, targetHeightScale);
+      const scale = baseScale * state.pdfView.zoom;
+      const width = frame.image_width_px * scale;
+      const height = frame.image_height_px * scale;
       return {
-        x: (containerWidth - width) / 2,
-        y: (containerHeight - height) / 2,
+        x: state.pdfView.panX,
+        y: state.pdfView.panY,
+        scale,
         width,
         height,
-        scale,
+      };
+    }
+
+    function canvasToPdf(layout, x, y) {
+      return [
+        (x - layout.x) / layout.scale,
+        (y - layout.y) / layout.scale,
+      ];
+    }
+
+    function pdfToCanvas(layout, point) {
+      return {
+        x: layout.x + (point[0] * layout.scale),
+        y: layout.y + (point[1] * layout.scale),
       };
     }
 
@@ -816,57 +1019,41 @@ def build_html(config: dict[str, Any]) -> str:
       ctx.restore();
     }
 
-    function pdfRectForFrame(frame, rect) {
-      return fitImageRect(rect.width, rect.height, frame.image_width_px, frame.image_height_px);
-    }
-
-    function pdfPointToCanvas(pdfRect, point) {
-      return {
-        x: pdfRect.x + (point[0] * pdfRect.scale),
-        y: pdfRect.y + (point[1] * pdfRect.scale),
-      };
-    }
-
-    function canvasPointToPdf(pdfRect, x, y) {
-      return [
-        (x - pdfRect.x) / pdfRect.scale,
-        (y - pdfRect.y) / pdfRect.scale,
-      ];
-    }
-
     async function drawPdfPane() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
       const rect = resizePdfCanvas();
+      clearPdfError();
       pdfCtx.clearRect(0, 0, rect.width, rect.height);
-      pdfCtx.fillStyle = '#eef2f7';
+      pdfCtx.fillStyle = '#ebe7df';
       pdfCtx.fillRect(0, 0, rect.width, rect.height);
-      const pdfRect = pdfRectForFrame(frame, rect);
+      const layout = currentPdfLayout(frame, rect, state);
 
       try {
-        const baseImage = await loadImage(frame.image_path);
-        pdfCtx.drawImage(baseImage, pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
-        const redImage = await loadImage(frame.redlines_path);
-        pdfCtx.globalAlpha = 0.95;
-        pdfCtx.drawImage(redImage, pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
-        pdfCtx.globalAlpha = 1;
+        const mode = ui.pdfDisplaySelect.value;
+        if (mode !== 'redlines') {
+          const baseImage = await loadImage(frame.image_path);
+          pdfCtx.drawImage(baseImage, layout.x, layout.y, layout.width, layout.height);
+        }
+        if (mode !== 'map') {
+          const redImage = await loadImage(frame.redlines_path);
+          pdfCtx.globalAlpha = mode === 'both' ? 0.92 : 1;
+          pdfCtx.drawImage(redImage, layout.x, layout.y, layout.width, layout.height);
+          pdfCtx.globalAlpha = 1;
+        }
       } catch (error) {
-        pdfCtx.fillStyle = '#991b1b';
-        pdfCtx.font = '700 14px ui-sans-serif, system-ui, sans-serif';
-        pdfCtx.fillText(error.message, 20, 40);
+        showPdfError(error.message);
       }
 
-      pdfCtx.lineWidth = 3;
       pdfCtx.strokeStyle = 'rgba(29,78,216,0.95)';
-      pdfCtx.strokeRect(pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
+      pdfCtx.lineWidth = 3;
+      pdfCtx.strokeRect(layout.x, layout.y, layout.width, layout.height);
 
       state.controlPoints.forEach((pair, index) => {
         if (!pair.pdf_px) return;
-        const point = pdfPointToCanvas(pdfRect, pair.pdf_px);
+        const point = pdfToCanvas(layout, pair.pdf_px);
         drawMarker(pdfCtx, point.x, point.y, index + 1, 'rgba(29,78,216,0.95)', '#ffffff', '#ffffff');
       });
-
-      return pdfRect;
     }
 
     function localMeters(lonlat, refLonLat) {
@@ -906,86 +1093,139 @@ def build_html(config: dict[str, Any]) -> str:
       return a.map((row) => row[n]);
     }
 
-    function fitProjective(src, dst) {
-      const matrix = [];
+    function solveLeastSquares(rows, values, columns) {
+      const ata = Array.from({ length: columns }, () => Array(columns).fill(0));
+      const atb = Array(columns).fill(0);
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex];
+        for (let i = 0; i < columns; i += 1) {
+          atb[i] += row[i] * values[rowIndex];
+          for (let j = 0; j < columns; j += 1) {
+            ata[i][j] += row[i] * row[j];
+          }
+        }
+      }
+      return solveLinearSystem(ata, atb);
+    }
+
+    function fitSimilarityModel(src, dst, refLonLat) {
+      const rows = [];
       const values = [];
-      for (let i = 0; i < src.length; i += 1) {
-        const [x, y] = src[i];
-        const [u, v] = dst[i];
-        matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+      for (let index = 0; index < src.length; index += 1) {
+        const [x, y] = src[index];
+        const [u, v] = dst[index];
+        rows.push([x, -y, 1, 0]);
         values.push(u);
-        matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+        rows.push([y, x, 0, 1]);
         values.push(v);
       }
-      return solveLinearSystem(matrix, values);
-    }
-
-    function applyProjectivePoint(params, point) {
-      const [h11, h12, h13, h21, h22, h23, h31, h32] = params;
-      const [x, y] = point;
-      const denom = (h31 * x) + (h32 * y) + 1;
-      if (Math.abs(denom) < 1e-9) return null;
-      return [
-        ((h11 * x) + (h12 * y) + h13) / denom,
-        ((h21 * x) + (h22 * y) + h23) / denom,
-      ];
-    }
-
-    function fitSimilarityFromTwoPairs(pairs) {
-      const src1 = pairs[0].pdf_px;
-      const src2 = pairs[1].pdf_px;
-      const ref = [
-        (pairs[0].lonlat[0] + pairs[1].lonlat[0]) / 2,
-        (pairs[0].lonlat[1] + pairs[1].lonlat[1]) / 2,
-      ];
-      const dst1 = localMeters(pairs[0].lonlat, ref);
-      const dst2 = localMeters(pairs[1].lonlat, ref);
-      const sv = [src2[0] - src1[0], src2[1] - src1[1]];
-      const tv = [dst2[0] - dst1[0], dst2[1] - dst1[1]];
-      const sNorm = Math.hypot(sv[0], sv[1]);
-      const tNorm = Math.hypot(tv[0], tv[1]);
-      if (sNorm < 1e-6 || tNorm < 1e-6) {
-        throw new Error('2点が近すぎるため similarity 変換を計算できません。');
-      }
-      const scale = tNorm / sNorm;
-      const angle = Math.atan2(tv[1], tv[0]) - Math.atan2(sv[1], sv[0]);
-      const cosA = Math.cos(angle);
-      const sinA = Math.sin(angle);
-      const srcCenter = [(src1[0] + src2[0]) / 2, (src1[1] + src2[1]) / 2];
-      const dstCenter = [(dst1[0] + dst2[0]) / 2, (dst1[1] + dst2[1]) / 2];
-      const rotatedCenter = [
-        scale * ((cosA * srcCenter[0]) - (sinA * srcCenter[1])),
-        scale * ((sinA * srcCenter[0]) + (cosA * srcCenter[1])),
-      ];
-      const translation = [dstCenter[0] - rotatedCenter[0], dstCenter[1] - rotatedCenter[1]];
+      const params = solveLeastSquares(rows, values, 4);
+      if (!params) throw new Error('similarity 変換を計算できません。');
+      const [a, b, tx, ty] = params;
       return {
-        refLonLat: ref,
-        apply(point) {
-          const local = [
-            scale * ((cosA * point[0]) - (sinA * point[1])) + translation[0],
-            scale * ((sinA * point[0]) + (cosA * point[1])) + translation[1],
+        type: 'similarity',
+        refLonLat,
+        applyLocal(point) {
+          const [x, y] = point;
+          return [
+            (a * x) - (b * y) + tx,
+            (b * x) + (a * y) + ty,
           ];
-          return metersToLonLat(local, ref);
+        },
+        apply(point) {
+          return metersToLonLat(this.applyLocal(point), refLonLat);
         },
       };
     }
 
-    function fitProjectiveFromPairs(pairs) {
-      const ref = pairs.reduce((acc, pair) => [acc[0] + pair.lonlat[0], acc[1] + pair.lonlat[1]], [0, 0]).map((value) => value / pairs.length);
-      const src = pairs.map((pair) => pair.pdf_px);
-      const dst = pairs.map((pair) => localMeters(pair.lonlat, ref));
-      const params = fitProjective(src, dst);
-      if (!params) {
-        throw new Error('projective 変換を計算できません。');
+    function fitAffineModel(src, dst, refLonLat) {
+      const rows = [];
+      const values = [];
+      for (let index = 0; index < src.length; index += 1) {
+        const [x, y] = src[index];
+        const [u, v] = dst[index];
+        rows.push([x, y, 1, 0, 0, 0]);
+        values.push(u);
+        rows.push([0, 0, 0, x, y, 1]);
+        values.push(v);
       }
+      const params = solveLeastSquares(rows, values, 6);
+      if (!params) throw new Error('affine 変換を計算できません。');
+      const [a, b, c, d, e, f] = params;
       return {
-        refLonLat: ref,
+        type: 'affine',
+        refLonLat,
+        applyLocal(point) {
+          const [x, y] = point;
+          return [
+            (a * x) + (b * y) + c,
+            (d * x) + (e * y) + f,
+          ];
+        },
         apply(point) {
-          const local = applyProjectivePoint(params, point);
-          if (!local) throw new Error('projective 変換結果が不正です。');
-          return metersToLonLat(local, ref);
+          return metersToLonLat(this.applyLocal(point), refLonLat);
         },
       };
+    }
+
+    function fitProjectiveParameters(src, dst) {
+      const rows = [];
+      const values = [];
+      for (let index = 0; index < src.length; index += 1) {
+        const [x, y] = src[index];
+        const [u, v] = dst[index];
+        rows.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+        values.push(u);
+        rows.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+        values.push(v);
+      }
+      return solveLeastSquares(rows, values, 8);
+    }
+
+    function fitProjectiveModel(src, dst, refLonLat) {
+      const params = fitProjectiveParameters(src, dst);
+      if (!params) throw new Error('projective 変換を計算できません。');
+      return {
+        type: 'projective',
+        refLonLat,
+        applyLocal(point) {
+          const [h11, h12, h13, h21, h22, h23, h31, h32] = params;
+          const [x, y] = point;
+          const denom = (h31 * x) + (h32 * y) + 1;
+          if (Math.abs(denom) < 1e-9) throw new Error('projective 変換結果が不正です。');
+          return [
+            ((h11 * x) + (h12 * y) + h13) / denom,
+            ((h21 * x) + (h22 * y) + h23) / denom,
+          ];
+        },
+        apply(point) {
+          return metersToLonLat(this.applyLocal(point), refLonLat);
+        },
+      };
+    }
+
+    function rmseForModel(model, pairs) {
+      let sumSq = 0;
+      for (const pair of pairs) {
+        const predicted = model.applyLocal(pair.pdf_px);
+        const target = localMeters(pair.lonlat, model.refLonLat);
+        const error = Math.hypot(predicted[0] - target[0], predicted[1] - target[1]);
+        sumSq += error * error;
+      }
+      return Math.sqrt(sumSq / pairs.length);
+    }
+
+    function buildModels(pairs) {
+      const refLonLat = pairs
+        .reduce((acc, pair) => [acc[0] + pair.lonlat[0], acc[1] + pair.lonlat[1]], [0, 0])
+        .map((value) => value / pairs.length);
+      const src = pairs.map((pair) => pair.pdf_px);
+      const dst = pairs.map((pair) => localMeters(pair.lonlat, refLonLat));
+      const models = {};
+      if (pairs.length >= 2) models.similarity = fitSimilarityModel(src, dst, refLonLat);
+      if (pairs.length >= 3) models.affine = fitAffineModel(src, dst, refLonLat);
+      if (pairs.length >= 4) models.projective = fitProjectiveModel(src, dst, refLonLat);
+      return models;
     }
 
     function imageCorners(frame) {
@@ -1009,8 +1249,8 @@ def build_html(config: dict[str, Any]) -> str:
       ];
     }
 
-    function transformRouteGeometry(frame, geometry, transformer) {
-      const transformLine = (line) => line.map((coord) => transformer.apply(routeCoordToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
+    function transformRouteGeometry(frame, geometry, model) {
+      const transformLine = (line) => line.map((coord) => model.apply(routeCoordToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
       if (geometry.type === 'LineString') {
         return { type: 'LineString', coordinates: transformLine(geometry.coordinates) };
       }
@@ -1018,43 +1258,53 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function buildPreview(frame, state) {
-      const pairs = state.controlPoints.filter((pair) => pair.pdf_px && pair.lonlat).slice(0, requiredPoints());
-      if (pairs.length < requiredPoints()) {
-        throw new Error(`${requiredPoints()}組の対応点が必要です。`);
+      const pairs = state.controlPoints.filter((pair) => pair.pdf_px && pair.lonlat);
+      if (pairs.length < 2) {
+        throw new Error('2組以上の対応点が必要です。');
       }
-      const transformer = currentTransformType() === 'similarity'
-        ? fitSimilarityFromTwoPairs(pairs)
-        : fitProjectiveFromPairs(pairs);
+      const models = buildModels(pairs);
+      const selected = currentTransformChoice();
+      let activeModel = models.similarity;
+      if (selected === 'projective' && models.projective) {
+        activeModel = models.projective;
+      }
+
+      const metricsByModel = {
+        similarity: models.similarity ? rmseForModel(models.similarity, pairs) : null,
+        affine: models.affine ? rmseForModel(models.affine, pairs) : null,
+        projective: models.projective ? rmseForModel(models.projective, pairs) : null,
+      };
 
       const transformedControl = [];
       const residuals = [];
       let sumSq = 0;
-      for (let index = 0; index < pairs.length; index += 1) {
-        const predicted = transformer.apply(pairs[index].pdf_px);
+      pairs.forEach((pair, index) => {
+        const predicted = activeModel.apply(pair.pdf_px);
         transformedControl.push({ label: String(index + 1), lonlat: predicted });
-        const targetMeters = localMeters(pairs[index].lonlat, transformer.refLonLat);
-        const predMeters = localMeters(predicted, transformer.refLonLat);
+        const targetMeters = localMeters(pair.lonlat, activeModel.refLonLat);
+        const predMeters = localMeters(predicted, activeModel.refLonLat);
         const error = Math.hypot(predMeters[0] - targetMeters[0], predMeters[1] - targetMeters[1]);
         sumSq += error * error;
         residuals.push({
           label: String(index + 1),
-          coordinates: [predicted, pairs[index].lonlat],
+          coordinates: [predicted, pair.lonlat],
           error_m: error,
         });
-      }
+      });
       const rmse = Math.sqrt(sumSq / pairs.length);
-      const corners = imageCorners(frame).map((point) => transformer.apply(point).map((value) => Number(value.toFixed(7))));
+      const corners = imageCorners(frame).map((point) => activeModel.apply(point).map((value) => Number(value.toFixed(7))));
       const transformedRoutes = {
         type: 'FeatureCollection',
-        features: frame.route_geojson.features.map((feature) => ({
+        features: (frame.route_geojson?.features || []).map((feature) => ({
           type: 'Feature',
-          geometry: transformRouteGeometry(frame, feature.geometry, transformer),
+          geometry: transformRouteGeometry(frame, feature.geometry, activeModel),
           properties: { ...feature.properties },
         })),
       };
       return {
-        transform_type: currentTransformType(),
+        transform_type: activeModel.type,
         rmse_m: rmse,
+        metrics_by_model: metricsByModel,
         transformed_routes: transformedRoutes,
         transformed_control_points: transformedControl,
         residuals,
@@ -1068,17 +1318,13 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function buildSavePayload(frame, state) {
-      const preview = state.preview;
-      if (!preview) {
-        throw new Error('Preview を先に実行してください。');
-      }
+      if (!state.preview) throw new Error('Preview を先に実行してください。');
       return {
         page_no: frame.page_no,
         frame_id: frame.frame_id,
-        transform_type: preview.transform_type,
+        transform_type: state.preview.transform_type,
         control_points: state.controlPoints
           .filter((pair) => pair.pdf_px && pair.lonlat)
-          .slice(0, requiredPoints())
           .map((pair, index) => ({
             index: index + 1,
             pdf_image_px: {
@@ -1090,8 +1336,8 @@ def build_html(config: dict[str, Any]) -> str:
               Number(pair.lonlat[1].toFixed(7)),
             ],
           })),
-        corners_lonlat: preview.corners_lonlat,
-        rmse_m: Number(preview.rmse_m.toFixed(3)),
+        corners_lonlat: state.preview.corners_lonlat,
+        rmse_m: Number(state.preview.rmse_m.toFixed(3)),
         created_at: new Date().toISOString(),
       };
     }
@@ -1115,10 +1361,41 @@ def build_html(config: dict[str, Any]) -> str:
         ui.jsonPreview.textContent = JSON.stringify({
           page_no: frame.page_no,
           frame_id: frame.frame_id,
-          transform_type: currentTransformType(),
+          transform_type: currentTransformChoice(),
           control_points: state.controlPoints,
         }, null, 2);
       }
+    }
+
+    function coordsFromCorners(corners) {
+      if (!corners) return [];
+      return ['top_left', 'top_right', 'bottom_right', 'bottom_left']
+        .filter((key) => Array.isArray(corners[key]))
+        .map((key) => corners[key]);
+    }
+
+    function fitMapToCoords(coords) {
+      if (!mapReady || !coords.length) return false;
+      if (coords.length === 1) {
+        map.jumpTo({ center: coords[0], zoom: 14.5 });
+        return true;
+      }
+      const bounds = new mapboxgl.LngLatBounds();
+      coords.forEach((coord) => bounds.extend(coord));
+      map.fitBounds(bounds, { padding: 48, duration: 0, maxZoom: 16.5 });
+      return true;
+    }
+
+    function fitMapToFrameInitial(frame) {
+      if (!mapReady) return;
+      if (fitMapToCoords(coordsFromCorners(frame.saved_corners))) return;
+      if (fitMapToCoords((frame.manual_geo_points || []).map((point) => [point.longitude, point.latitude]))) return;
+      if (fitMapToCoords((frame.auto_geo_points || []).map((point) => [point.longitude, point.latitude]))) return;
+      if (fitMapToCoords(coordsFromCorners(frame.initial_corners))) return;
+      map.jumpTo({
+        center: frame.initial_center || config.initial_map_center || [133.5, 33.8],
+        zoom: frame.initial_zoom || config.initial_map_zoom || 8.5,
+      });
     }
 
     function updateMapSources(frame, state) {
@@ -1155,13 +1432,6 @@ def build_html(config: dict[str, Any]) -> str:
       map.getSource('residuals')?.setData({ type: 'FeatureCollection', features: residualFeatures });
     }
 
-    function fitPreviewBounds(frame, state) {
-      if (!mapReady || !state.preview) return;
-      const bounds = new mapboxgl.LngLatBounds();
-      Object.values(state.preview.corners_lonlat).forEach((coord) => bounds.extend(coord));
-      map.fitBounds(bounds, { padding: 40, duration: 0, maxZoom: 17 });
-    }
-
     function updateUi() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
@@ -1183,35 +1453,47 @@ def build_html(config: dict[str, Any]) -> str:
       try {
         state.preview = buildPreview(frame, state);
         state.dirty = true;
-        state.notice = `Preview 更新 / RMSE ${state.preview.rmse_m.toFixed(2)} m`;
+        const compare = [];
+        const metrics = state.preview.metrics_by_model || {};
+        if (Number.isFinite(metrics.affine)) compare.push(`aff ${metrics.affine.toFixed(2)}m`);
+        if (Number.isFinite(metrics.projective)) compare.push(`proj ${metrics.projective.toFixed(2)}m`);
+        state.notice = `Preview 更新 / active ${state.preview.transform_type} / RMSE ${state.preview.rmse_m.toFixed(2)} m${compare.length ? ` / compare ${compare.join(' | ')}` : ''}`;
         updateUi();
-        fitPreviewBounds(frame, state);
+        fitMapToCoords(coordsFromCorners(state.preview.corners_lonlat));
       } catch (error) {
         state.notice = error.message;
         updateUi();
       }
     }
 
-    function resetFrame(frame) {
+    function resetFrame(frame, { keepNotice = false } = {}) {
       const state = getState(frame);
       state.controlPoints = [];
       state.preview = null;
       state.dirty = false;
-      state.notice = '';
+      if (!keepNotice) state.notice = '';
       renderAll();
+      fitMapToFrameInitial(frame);
     }
 
-    function onPdfClick(event) {
+    function onPdfCanvasClick(event) {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
+      if (state.dragState && state.dragState.moved) {
+        state.dragState = null;
+        return;
+      }
       if (expectedSide(state) !== 'pdf') return;
       const rect = ui.pdfCanvas.getBoundingClientRect();
-      const pdfRect = pdfRectForFrame(frame, rect);
+      const layout = currentPdfLayout(frame, rect, state);
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      if (x < pdfRect.x || x > pdfRect.x + pdfRect.width || y < pdfRect.y || y > pdfRect.y + pdfRect.height) return;
-      const point = canvasPointToPdf(pdfRect, x, y).map((value, index) => Number(clamp(value, 0, index === 0 ? frame.image_width_px : frame.image_height_px).toFixed(3)));
-      state.controlPoints.push({ pdf_px: point, lonlat: null });
+      const point = canvasToPdf(layout, x, y);
+      if (point[0] < 0 || point[0] > frame.image_width_px || point[1] < 0 || point[1] > frame.image_height_px) return;
+      state.controlPoints.push({
+        pdf_px: [Number(point[0].toFixed(3)), Number(point[1].toFixed(3))],
+        lonlat: null,
+      });
       state.preview = null;
       state.notice = `PDF point ${state.controlPoints.length} を記録しました`;
       renderAll();
@@ -1226,7 +1508,7 @@ def build_html(config: dict[str, Any]) -> str:
       pair.lonlat = [Number(event.lngLat.lng.toFixed(7)), Number(event.lngLat.lat.toFixed(7))];
       state.preview = null;
       state.notice = `Mapbox point ${completedPairs(state)} を記録しました`;
-      if (completedPairs(state) >= requiredPoints()) {
+      if (completedPairs(state) >= 2) {
         previewCurrent();
       } else {
         renderAll();
@@ -1257,9 +1539,7 @@ def build_html(config: dict[str, Any]) -> str:
       const frame = frameById(currentFrameId);
       const state = getState(frame);
       try {
-        if (!state.preview) {
-          state.preview = buildPreview(frame, state);
-        }
+        if (!state.preview) state.preview = buildPreview(frame, state);
         downloadJson(frame.suggested_download_filename, buildSavePayload(frame, state));
         state.dirty = false;
         state.notice = `保存用JSONをダウンロードしました\n配置先: data/manual_image_georef/\n${frame.suggested_download_filename}`;
@@ -1276,11 +1556,83 @@ def build_html(config: dict[str, Any]) -> str:
       const next = frames[(index + 1) % frames.length];
       currentFrameId = next.frame_id;
       ui.frameSelect.value = currentFrameId;
+      const nextFrame = frameById(currentFrameId);
+      const nextState = getState(nextFrame);
+      nextState.pdfView.fitApplied = false;
       renderAll();
+      fitMapToFrameInitial(nextFrame);
     }
 
     function onFrameChange() {
       currentFrameId = ui.frameSelect.value;
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      state.pdfView.fitApplied = false;
+      renderAll();
+      fitMapToFrameInitial(frame);
+    }
+
+    function onFitPdf() {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      fitPdfView(frame, rect, state);
+      renderAll();
+    }
+
+    function beginPdfPan(event) {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      state.dragState = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        panX: state.pdfView.panX,
+        panY: state.pdfView.panY,
+        moved: false,
+      };
+      ui.pdfCanvas.setPointerCapture(event.pointerId);
+    }
+
+    function movePdfPan(event) {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const drag = state.dragState;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (Math.hypot(dx, dy) > 4) drag.moved = true;
+      state.pdfView.panX = drag.panX + dx;
+      state.pdfView.panY = drag.panY + dy;
+      renderAll();
+    }
+
+    function endPdfPan(event) {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const drag = state.dragState;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      state.dragState = drag;
+      ui.pdfCanvas.releasePointerCapture(event.pointerId);
+      setTimeout(() => {
+        if (state.dragState === drag) state.dragState = null;
+      }, 0);
+    }
+
+    function onPdfWheel(event) {
+      event.preventDefault();
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      const before = currentPdfLayout(frame, rect, state);
+      const anchorX = event.clientX - rect.left;
+      const anchorY = event.clientY - rect.top;
+      const imagePoint = canvasToPdf(before, anchorX, anchorY);
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      state.pdfView.zoom = clamp(state.pdfView.zoom * factor, 0.6, 8);
+      const after = currentPdfLayout(frame, rect, state);
+      state.pdfView.panX += anchorX - (after.x + imagePoint[0] * after.scale);
+      state.pdfView.panY += anchorY - (after.y + imagePoint[1] * after.scale);
       renderAll();
     }
 
@@ -1307,12 +1659,11 @@ def build_html(config: dict[str, Any]) -> str:
         map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         map.addSource('control-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
         map.addSource('residuals', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
         map.addLayer({
           id: 'routes-line',
           type: 'line',
           source: 'routes',
-          paint: { 'line-color': '#dc2626', 'line-width': 3 },
+          paint: { 'line-color': '#dc2626', 'line-width': 3.2 },
         });
         map.addLayer({
           id: 'residuals-line',
@@ -1338,7 +1689,7 @@ def build_html(config: dict[str, Any]) -> str:
           source: 'control-points',
           filter: ['==', ['get', 'kind'], 'predicted'],
           paint: {
-            'circle-radius': 8,
+            'circle-radius': 7,
             'circle-color': '#2563eb',
             'circle-stroke-width': 2,
             'circle-stroke-color': '#ffffff',
@@ -1354,32 +1705,49 @@ def build_html(config: dict[str, Any]) -> str:
             'text-offset': [0, 0],
             'text-anchor': 'center',
           },
-          paint: {
-            'text-color': '#ffffff',
-          },
+          paint: { 'text-color': '#ffffff' },
         });
         map.on('click', onMapClick);
         map.on('error', (event) => {
           const message = event && event.error && event.error.message ? event.error.message : 'Mapbox error';
           showRightError(message);
         });
+        fitMapToFrameInitial(frameById(currentFrameId));
         renderAll();
       });
     }
 
     function wireUi() {
       ui.frameSelect.addEventListener('change', onFrameChange);
-      ui.modeSelect.addEventListener('change', () => {
-        const frame = frameById(currentFrameId);
-        resetFrame(frame);
-      });
       ui.undoButton.addEventListener('click', onUndo);
       ui.clearButton.addEventListener('click', onClear);
       ui.previewButton.addEventListener('click', previewCurrent);
       ui.saveButton.addEventListener('click', onSave);
       ui.nextButton.addEventListener('click', onNextFrame);
-      ui.pdfCanvas.addEventListener('click', onPdfClick);
-      window.addEventListener('resize', renderAll);
+      ui.pdfDisplaySelect.addEventListener('change', renderAll);
+      ui.fitPdfButton.addEventListener('click', onFitPdf);
+      ui.transformSelect.addEventListener('change', () => {
+        const frame = frameById(currentFrameId);
+        const state = getState(frame);
+        if (completedPairs(state) >= 2) {
+          previewCurrent();
+        } else {
+          updateUi();
+        }
+      });
+      ui.pdfCanvas.addEventListener('click', onPdfCanvasClick);
+      ui.pdfCanvas.addEventListener('pointerdown', beginPdfPan);
+      ui.pdfCanvas.addEventListener('pointermove', movePdfPan);
+      ui.pdfCanvas.addEventListener('pointerup', endPdfPan);
+      ui.pdfCanvas.addEventListener('pointercancel', endPdfPan);
+      ui.pdfCanvas.addEventListener('wheel', onPdfWheel, { passive: false });
+      window.addEventListener('resize', () => {
+        const frame = frameById(currentFrameId);
+        const state = getState(frame);
+        state.pdfView.fitApplied = false;
+        renderAll();
+        fitMapToFrameInitial(frame);
+      });
     }
 
     if (validateConfig()) {
@@ -1516,6 +1884,8 @@ def main() -> None:
                     "has_saved_georef": bool(saved_corners),
                     "saved_corners": saved_corners,
                     "saved_georef_path": str(saved_row.get("__path__", "")) if saved_row else "",
+                    "manual_geo_points": serializable_manual_geo_points(manual_gcp),
+                    "auto_geo_points": serializable_auto_geo_points(auto_rows),
                     "suggested_download_filename": f"page_{page_no:03d}_{frame_id}.json",
                     "frame_area_pt2": round(float(frame_row["area_pt2"]), 3),
                     "rmse_m": None if not frame_model or frame_model.get("rmse_m") in (None, "") else round(float(frame_model["rmse_m"]), 3),
@@ -1532,6 +1902,7 @@ def main() -> None:
         "initial_map_center": DEFAULT_CENTER,
         "initial_map_zoom": DEFAULT_ZOOM,
         "default_frame_id": manifest_frames[0]["frame_id"] if manifest_frames else "",
+        "frame_count": len(manifest_frames),
         "frames": manifest_frames,
     }
 
