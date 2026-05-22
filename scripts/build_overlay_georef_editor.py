@@ -577,17 +577,34 @@ def build_html(config: dict[str, Any]) -> str:
     #metrics strong { color: var(--text); }
     #workspace {
       display: grid;
-      grid-template-columns: 45fr 55fr;
       min-height: 0;
+    }
+    #workspace.layout-split {
+      grid-template-columns: 45fr 55fr;
+      grid-template-rows: 1fr;
+    }
+    #workspace.layout-stacked {
+      grid-template-columns: 1fr;
+      grid-template-rows: clamp(320px, 40vh, 460px) 1fr;
     }
     .pane {
       position: relative;
       min-width: 0;
       min-height: 0;
-      border-right: 1px solid var(--border);
       background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(247,244,239,0.98) 100%);
     }
-    .pane:last-child { border-right: 0; }
+    #workspace.layout-split .pane {
+      border-right: 1px solid var(--border);
+    }
+    #workspace.layout-split .pane:last-child {
+      border-right: 0;
+    }
+    #workspace.layout-stacked .pane {
+      border-bottom: 1px solid var(--border);
+    }
+    #workspace.layout-stacked .pane:last-child {
+      border-bottom: 0;
+    }
     .paneHeader {
       position: absolute;
       top: 0;
@@ -627,6 +644,18 @@ def build_html(config: dict[str, Any]) -> str:
     .subtleButton {
       background: rgba(255,255,255,0.92);
     }
+    .zoomBadge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(15,23,42,0.1);
+      background: rgba(255,255,255,0.94);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
     #rightError {
       position: absolute;
       top: 58px;
@@ -660,7 +689,7 @@ def build_html(config: dict[str, Any]) -> str:
       position: absolute;
       left: 12px;
       right: 12px;
-      bottom: 12px;
+      bottom: 84px;
       z-index: 6;
       background: rgba(127,29,29,0.92);
       color: white;
@@ -669,6 +698,22 @@ def build_html(config: dict[str, Any]) -> str:
       display: none;
       white-space: pre-wrap;
       font-size: 12px;
+    }
+    #pdfDebug {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 6;
+      margin: 0;
+      padding: 10px 12px;
+      width: min(340px, calc(100% - 24px));
+      background: rgba(15,23,42,0.84);
+      color: #e2e8f0;
+      border-radius: 12px;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      pointer-events: none;
     }
     details#advancedPanel {
       position: absolute;
@@ -704,15 +749,20 @@ def build_html(config: dict[str, Any]) -> str:
       #toolbar {
         grid-template-columns: 1fr 1fr;
       }
-      #workspace {
+      #workspace.layout-split,
+      #workspace.layout-stacked {
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr 1fr;
+        grid-template-rows: clamp(260px, 34vh, 380px) 1fr;
       }
-      .pane {
+      #workspace.layout-split .pane,
+      #workspace.layout-stacked .pane {
         border-right: 0;
         border-bottom: 1px solid var(--border);
       }
-      .pane:last-child { border-bottom: 0; }
+      #workspace.layout-split .pane:last-child,
+      #workspace.layout-stacked .pane:last-child {
+        border-bottom: 0;
+      }
     }
   </style>
 </head>
@@ -734,8 +784,8 @@ def build_html(config: dict[str, Any]) -> str:
       <div id="metrics"></div>
       <div id="notice"></div>
     </div>
-    <div id="workspace">
-      <section class="pane">
+    <div id="workspace" class="layout-split">
+      <section class="pane" id="pdfPane">
         <div class="paneHeader">
           <div class="paneTitle">PDF</div>
           <div class="paneControls">
@@ -744,13 +794,18 @@ def build_html(config: dict[str, Any]) -> str:
               <option value="map">元地図</option>
               <option value="redlines">赤線のみ</option>
             </select>
-            <button id="fitPdfButton" class="subtleButton">Fit PDF</button>
+            <button id="zoomOutButton" class="subtleButton">-</button>
+            <button id="zoomInButton" class="subtleButton">+</button>
+            <button id="zoomResetButton" class="subtleButton">100%</button>
+            <button id="fitWidthButton" class="subtleButton">Fit Width</button>
+            <span id="pdfZoomLabel" class="zoomBadge">100%</span>
           </div>
         </div>
         <canvas id="pdfCanvas"></canvas>
         <div id="pdfError"></div>
+        <pre id="pdfDebug"></pre>
       </section>
-      <section class="pane">
+      <section class="pane" id="mapPane">
         <div class="paneHeader">
           <div class="paneTitle">Mapbox</div>
           <div class="paneControls">
@@ -783,8 +838,8 @@ def build_html(config: dict[str, Any]) -> str:
     const config = window.__OVERLAY_GEOREF_CONFIG__;
     const MAPBOX_SCALE = 0.01;
     const EARTH_RADIUS_M = 6378137.0;
-    const PDF_INITIAL_FILL_RATIO = 0.82;
     const ui = {
+      workspace: document.getElementById('workspace'),
       frameSelect: document.getElementById('frameSelect'),
       frameCount: document.getElementById('frameCount'),
       undoButton: document.getElementById('undoButton'),
@@ -793,13 +848,18 @@ def build_html(config: dict[str, Any]) -> str:
       saveButton: document.getElementById('saveButton'),
       nextButton: document.getElementById('nextButton'),
       pdfDisplaySelect: document.getElementById('pdfDisplaySelect'),
-      fitPdfButton: document.getElementById('fitPdfButton'),
+      zoomOutButton: document.getElementById('zoomOutButton'),
+      zoomInButton: document.getElementById('zoomInButton'),
+      zoomResetButton: document.getElementById('zoomResetButton'),
+      fitWidthButton: document.getElementById('fitWidthButton'),
+      pdfZoomLabel: document.getElementById('pdfZoomLabel'),
       transformSelect: document.getElementById('transformSelect'),
       stepText: document.getElementById('stepText'),
       metrics: document.getElementById('metrics'),
       notice: document.getElementById('notice'),
       pdfCanvas: document.getElementById('pdfCanvas'),
       pdfError: document.getElementById('pdfError'),
+      pdfDebug: document.getElementById('pdfDebug'),
       rightError: document.getElementById('rightError'),
       jsonPreview: document.getElementById('jsonPreview'),
     };
@@ -863,6 +923,22 @@ def build_html(config: dict[str, Any]) -> str:
       return config.frames.find((frame) => frame.frame_id === frameId) || null;
     }
 
+    function aspectRatio(frame) {
+      return frame.image_width_px / Math.max(1, frame.image_height_px);
+    }
+
+    function resolveLayoutMode(frame) {
+      if (frame.frame_id === '061_f06') return 'stacked';
+      return aspectRatio(frame) > 2.2 ? 'stacked' : 'split';
+    }
+
+    function applyLayout(frame) {
+      const mode = resolveLayoutMode(frame);
+      ui.workspace.classList.remove('layout-split', 'layout-stacked');
+      ui.workspace.classList.add(`layout-${mode}`);
+      return mode;
+    }
+
     function getState(frame) {
       if (!frameState.has(frame.frame_id)) {
         frameState.set(frame.frame_id, {
@@ -906,6 +982,10 @@ def build_html(config: dict[str, Any]) -> str:
       ui.frameCount.textContent = `${frames.length} 件`;
     }
 
+    function currentZoomPercent(state) {
+      return Math.round(state.pdfView.zoom * 100);
+    }
+
     function updateStepText(frame, state) {
       const side = expectedSide(state);
       const done = completedPairs(state);
@@ -932,6 +1012,7 @@ def build_html(config: dict[str, Any]) -> str:
       const activeRmse = preview && Number.isFinite(preview.rmse_m) ? `${preview.rmse_m.toFixed(2)} m` : '-';
       ui.metrics.innerHTML = `<strong>frame</strong>: ${frame.frame_id} / <strong>pairs</strong>: ${done} / <strong>active</strong>: ${preview ? preview.transform_type : 'none'} / <strong>RMSE</strong>: ${activeRmse}${modelBits.length ? ` / <strong>compare</strong>: ${modelBits.join(' | ')}` : ''}`;
       ui.notice.textContent = state.notice || '';
+      ui.pdfZoomLabel.textContent = `${currentZoomPercent(state)}%`;
     }
 
     async function loadImage(url) {
@@ -957,10 +1038,8 @@ def build_html(config: dict[str, Any]) -> str:
       return rect;
     }
 
-    function fitPdfView(frame, rect, state) {
-      const widthScale = rect.width / frame.image_width_px;
-      const targetHeightScale = (rect.height * PDF_INITIAL_FILL_RATIO) / frame.image_height_px;
-      const baseScale = Math.max(widthScale, targetHeightScale);
+    function fitPdfWidth(frame, rect, state) {
+      const baseScale = rect.width / frame.image_width_px;
       const scaledWidth = frame.image_width_px * baseScale;
       const scaledHeight = frame.image_height_px * baseScale;
       const baseX = (rect.width - scaledWidth) / 2;
@@ -972,10 +1051,8 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function currentPdfLayout(frame, rect, state) {
-      if (!state.pdfView.fitApplied) fitPdfView(frame, rect, state);
-      const widthScale = rect.width / frame.image_width_px;
-      const targetHeightScale = (rect.height * PDF_INITIAL_FILL_RATIO) / frame.image_height_px;
-      const baseScale = Math.max(widthScale, targetHeightScale);
+      if (!state.pdfView.fitApplied) fitPdfWidth(frame, rect, state);
+      const baseScale = rect.width / frame.image_width_px;
       const scale = baseScale * state.pdfView.zoom;
       const width = frame.image_width_px * scale;
       const height = frame.image_height_px * scale;
@@ -1005,14 +1082,14 @@ def build_html(config: dict[str, Any]) -> str:
     function drawMarker(ctx, x, y, label, fillColor, strokeColor, textColor) {
       ctx.save();
       ctx.beginPath();
-      ctx.arc(x, y, 11, 0, Math.PI * 2);
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
       ctx.fillStyle = fillColor;
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 3;
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = textColor;
-      ctx.font = '700 12px ui-sans-serif, system-ui, sans-serif';
+      ctx.font = '700 13px ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(String(label), x, y + 0.5);
@@ -1022,6 +1099,7 @@ def build_html(config: dict[str, Any]) -> str:
     async function drawPdfPane() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
+      const layoutMode = applyLayout(frame);
       const rect = resizePdfCanvas();
       clearPdfError();
       pdfCtx.clearRect(0, 0, rect.width, rect.height);
@@ -1052,8 +1130,18 @@ def build_html(config: dict[str, Any]) -> str:
       state.controlPoints.forEach((pair, index) => {
         if (!pair.pdf_px) return;
         const point = pdfToCanvas(layout, pair.pdf_px);
-        drawMarker(pdfCtx, point.x, point.y, index + 1, 'rgba(29,78,216,0.95)', '#ffffff', '#ffffff');
+        drawMarker(pdfCtx, point.x, point.y, index + 1, 'rgba(29,78,216,0.98)', '#ffffff', '#ffffff');
       });
+
+      ui.pdfDebug.textContent = [
+        `image_width_px: ${frame.image_width_px}`,
+        `image_height_px: ${frame.image_height_px}`,
+        `canvas_width: ${Math.round(rect.width)}`,
+        `canvas_height: ${Math.round(rect.height)}`,
+        `layout mode: ${layoutMode}`,
+        `current zoom: ${currentZoomPercent(state)}%`,
+        `current pan: (${Math.round(state.pdfView.panX)}, ${Math.round(state.pdfView.panY)})`,
+      ].join('\n');
     }
 
     function localMeters(lonlat, refLonLat) {
@@ -1390,8 +1478,8 @@ def build_html(config: dict[str, Any]) -> str:
       if (!mapReady) return;
       if (fitMapToCoords(coordsFromCorners(frame.saved_corners))) return;
       if (fitMapToCoords((frame.manual_geo_points || []).map((point) => [point.longitude, point.latitude]))) return;
-      if (fitMapToCoords((frame.auto_geo_points || []).map((point) => [point.longitude, point.latitude]))) return;
       if (fitMapToCoords(coordsFromCorners(frame.initial_corners))) return;
+      if (fitMapToCoords((frame.auto_geo_points || []).map((point) => [point.longitude, point.latitude]))) return;
       map.jumpTo({
         center: frame.initial_center || config.initial_map_center || [133.5, 33.8],
         zoom: frame.initial_zoom || config.initial_map_zoom || 8.5,
@@ -1572,11 +1660,36 @@ def build_html(config: dict[str, Any]) -> str:
       fitMapToFrameInitial(frame);
     }
 
-    function onFitPdf() {
+    function setZoomAroundPoint(frame, state, rect, newZoom, anchorX, anchorY) {
+      const before = currentPdfLayout(frame, rect, state);
+      const imagePoint = canvasToPdf(before, anchorX, anchorY);
+      state.pdfView.zoom = clamp(newZoom, 0.5, 8);
+      const after = currentPdfLayout(frame, rect, state);
+      state.pdfView.panX += anchorX - (after.x + imagePoint[0] * after.scale);
+      state.pdfView.panY += anchorY - (after.y + imagePoint[1] * after.scale);
+    }
+
+    function onFitWidth() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
       const rect = ui.pdfCanvas.getBoundingClientRect();
-      fitPdfView(frame, rect, state);
+      fitPdfWidth(frame, rect, state);
+      renderAll();
+    }
+
+    function onZoomReset() {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      setZoomAroundPoint(frame, state, rect, 1, rect.width / 2, rect.height / 2);
+      renderAll();
+    }
+
+    function onZoomStep(multiplier) {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      setZoomAroundPoint(frame, state, rect, state.pdfView.zoom * multiplier, rect.width / 2, rect.height / 2);
       renderAll();
     }
 
@@ -1627,12 +1740,8 @@ def build_html(config: dict[str, Any]) -> str:
       const before = currentPdfLayout(frame, rect, state);
       const anchorX = event.clientX - rect.left;
       const anchorY = event.clientY - rect.top;
-      const imagePoint = canvasToPdf(before, anchorX, anchorY);
       const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-      state.pdfView.zoom = clamp(state.pdfView.zoom * factor, 0.6, 8);
-      const after = currentPdfLayout(frame, rect, state);
-      state.pdfView.panX += anchorX - (after.x + imagePoint[0] * after.scale);
-      state.pdfView.panY += anchorY - (after.y + imagePoint[1] * after.scale);
+      setZoomAroundPoint(frame, state, rect, state.pdfView.zoom * factor, anchorX, anchorY);
       renderAll();
     }
 
@@ -1725,7 +1834,10 @@ def build_html(config: dict[str, Any]) -> str:
       ui.saveButton.addEventListener('click', onSave);
       ui.nextButton.addEventListener('click', onNextFrame);
       ui.pdfDisplaySelect.addEventListener('change', renderAll);
-      ui.fitPdfButton.addEventListener('click', onFitPdf);
+      ui.zoomOutButton.addEventListener('click', () => onZoomStep(1 / 1.12));
+      ui.zoomInButton.addEventListener('click', () => onZoomStep(1.12));
+      ui.zoomResetButton.addEventListener('click', onZoomReset);
+      ui.fitWidthButton.addEventListener('click', onFitWidth);
       ui.transformSelect.addEventListener('change', () => {
         const frame = frameById(currentFrameId);
         const state = getState(frame);
