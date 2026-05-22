@@ -459,324 +459,170 @@ def build_html(config: dict[str, Any]) -> str:
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
   <style>
     :root {
-      --panel-bg: #fcfcfa;
-      --panel-border: #d6d3d1;
-      --surface: rgba(255,255,255,0.92);
-      --accent: #b91c1c;
-      --accent-2: #0f766e;
+      --bg: #f5f4ef;
+      --surface: #ffffff;
+      --border: #d6d3d1;
       --text: #111827;
       --muted: #4b5563;
+      --accent: #b91c1c;
+      --accent-2: #1d4ed8;
       --ok: #166534;
       --warn: #92400e;
-      --shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text); }
-    body { background: linear-gradient(180deg, #ece7e1 0%, #dbe4ea 100%); }
-    #app {
+    html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text); background: var(--bg); }
+    #app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; }
+    #toolbar {
       display: grid;
-      grid-template-columns: 360px 1fr;
-      height: 100%;
-      min-height: 0;
-    }
-    #sidebar {
-      border-right: 1px solid var(--panel-border);
-      background: var(--panel-bg);
-      overflow: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .panel {
-      background: rgba(255,255,255,0.92);
-      border: 1px solid rgba(15, 23, 42, 0.08);
-      border-radius: 14px;
+      grid-template-columns: 260px 170px 1fr auto auto auto auto auto;
+      gap: 10px;
+      align-items: center;
       padding: 12px;
-      box-shadow: var(--shadow);
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.94);
     }
-    .panel h2, .panel h3, .panel p { margin: 0; }
-    .panel h2 { font-size: 15px; margin-bottom: 10px; }
-    .field {
+    #statusbar {
       display: grid;
-      gap: 6px;
-      margin-bottom: 10px;
-    }
-    .field:last-child { margin-bottom: 0; }
-    label { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.02em; }
-    select, button, input {
-      font: inherit;
-    }
-    select, input[type="range"], button {
-      width: 100%;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.9);
+      align-items: center;
     }
     select, button {
-      min-height: 36px;
+      font: inherit;
+      min-height: 38px;
       border-radius: 10px;
-      border: 1px solid rgba(15, 23, 42, 0.12);
+      border: 1px solid rgba(15,23,42,0.14);
       background: white;
       padding: 8px 10px;
     }
-    button {
-      cursor: pointer;
-    }
-    button.primary {
-      background: var(--accent);
-      color: white;
-      border-color: transparent;
-    }
-    button.secondary {
-      background: #f5f5f4;
-    }
-    .button-row {
-      display: grid;
-      gap: 8px;
-      grid-template-columns: 1fr 1fr;
-    }
-    .button-row.triple {
-      grid-template-columns: 1fr 1fr 1fr;
-    }
-    .mode-grid {
-      display: grid;
-      gap: 8px;
-      grid-template-columns: 1fr 1fr;
-    }
-    .mode-button.active {
-      background: #111827;
-      color: white;
-      border-color: #111827;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      border-radius: 999px;
-      padding: 3px 8px;
-      font-size: 12px;
-      font-weight: 700;
-      background: rgba(15, 118, 110, 0.12);
-      color: var(--accent-2);
-    }
-    .badge.warn {
-      background: rgba(146, 64, 14, 0.12);
-      color: var(--warn);
-    }
-    #modeLabel {
-      font-size: 22px;
-      font-weight: 800;
-      line-height: 1.1;
-      margin-bottom: 8px;
-    }
+    button { cursor: pointer; }
+    button.primary { background: var(--accent); color: white; border-color: transparent; }
     #stepText {
+      font-weight: 800;
+      font-size: 18px;
       white-space: pre-wrap;
-      font-size: 13px;
-      line-height: 1.5;
     }
-    #statusText, #saveHint, #frameInfo {
-      white-space: pre-wrap;
+    #metrics, #notice {
       font-size: 12px;
-      line-height: 1.5;
-      color: var(--muted);
-    }
-    #jsonPreview {
-      margin: 0;
-      font-size: 11px;
-      line-height: 1.4;
-      overflow: auto;
-      max-height: 240px;
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 10px;
-      border-radius: 12px;
-    }
-    .hint {
-      font-size: 11px;
-      line-height: 1.5;
-      color: var(--muted);
       white-space: pre-wrap;
+      color: var(--muted);
     }
-    #mapWrap {
+    #metrics strong { color: var(--text); }
+    #workspace {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-height: 0;
+    }
+    .pane {
       position: relative;
       min-width: 0;
       min-height: 0;
+      border-right: 1px solid var(--border);
+      background: #fff;
     }
-    #map, #overlayCanvas {
+    .pane:last-child { border-right: 0; }
+    .paneTitle {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 5;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(15,23,42,0.1);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    #pdfCanvas {
+      position: absolute;
+      inset: 0;
+      cursor: crosshair;
+    }
+    #map {
       position: absolute;
       inset: 0;
     }
-    #overlayCanvas {
-      z-index: 2;
-      pointer-events: none;
-    }
-    .overlay-handle {
+    #rightError {
       position: absolute;
-      z-index: 4;
-      transform: translate(-50%, -50%);
-      border-radius: 999px;
-      pointer-events: auto;
-      user-select: none;
-      touch-action: none;
-    }
-    .corner-handle {
-      width: 16px;
-      height: 16px;
-      background: rgba(185, 28, 28, 0.35);
-      border: 2px solid rgba(255,255,255,0.95);
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.2);
-      cursor: grab;
-      opacity: 0.7;
-    }
-    .corner-handle.active {
-      opacity: 1;
-      background: rgba(185, 28, 28, 0.95);
-    }
-    #centerHandle {
-      width: 34px;
-      height: 34px;
-      background: rgba(15, 118, 110, 0.9);
-      border: 3px solid rgba(255,255,255,0.96);
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
-      cursor: grab;
-      display: grid;
-      place-items: center;
-      color: white;
-      font-weight: 900;
-      font-size: 14px;
-    }
-    #error {
-      position: absolute;
-      top: 14px;
-      right: 14px;
+      top: 50px;
+      left: 12px;
+      right: 12px;
       z-index: 6;
-      max-width: 420px;
-      background: rgba(127, 29, 29, 0.96);
+      background: rgba(127,29,29,0.95);
       color: white;
       padding: 10px 12px;
       border-radius: 12px;
       display: none;
       white-space: pre-wrap;
     }
-    #mapMessage {
+    #jsonPreview {
       position: absolute;
-      left: 14px;
-      bottom: 14px;
+      right: 12px;
+      bottom: 12px;
       z-index: 6;
-      background: rgba(15, 23, 42, 0.82);
-      color: white;
-      padding: 10px 12px;
+      width: min(420px, calc(100% - 24px));
+      max-height: 40%;
+      overflow: auto;
+      background: rgba(15,23,42,0.9);
+      color: #e2e8f0;
       border-radius: 12px;
-      font-size: 12px;
-      white-space: pre-wrap;
-      max-width: min(460px, calc(100vw - 40px));
-      pointer-events: none;
+      padding: 10px;
+      font-size: 11px;
+      line-height: 1.45;
+      margin: 0;
     }
-    @media (max-width: 1000px) {
-      #app {
+    @media (max-width: 1100px) {
+      #toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+      #workspace {
         grid-template-columns: 1fr;
-        grid-template-rows: minmax(320px, 44vh) 1fr;
+        grid-template-rows: 1fr 1fr;
       }
-      #sidebar {
+      .pane {
         border-right: 0;
-        border-bottom: 1px solid var(--panel-border);
+        border-bottom: 1px solid var(--border);
       }
+      .pane:last-child { border-bottom: 0; }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <aside id="sidebar">
-      <section class="panel">
-        <div id="modeLabel">2点合わせ</div>
-        <div id="stepText">PDF overlay上の点をクリックしてください。</div>
+    <div id="toolbar">
+      <select id="frameSelect"></select>
+      <select id="modeSelect">
+        <option value="similarity">2点合わせ</option>
+        <option value="projective">4点合わせ</option>
+      </select>
+      <div></div>
+      <button id="undoButton">Undo</button>
+      <button id="clearButton">Clear</button>
+      <button id="previewButton">Preview</button>
+      <button id="saveButton" class="primary">Save</button>
+      <button id="nextButton">Next Frame</button>
+    </div>
+    <div id="statusbar">
+      <div id="stepText">次: 左の PDF をクリックしてください</div>
+      <div id="metrics"></div>
+      <div id="notice"></div>
+    </div>
+    <div id="workspace">
+      <section class="pane">
+        <div class="paneTitle">PDF</div>
+        <canvas id="pdfCanvas"></canvas>
       </section>
-
-      <section class="panel">
-        <h2>Frame</h2>
-        <div class="field">
-          <label for="frameOrder">順序</label>
-          <select id="frameOrder">
-            <option value="priority">優先度順</option>
-            <option value="page">ページ順</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="frameSelect">対象 frame</label>
-          <select id="frameSelect"></select>
-        </div>
-        <div id="frameInfo"></div>
-      </section>
-
-      <section class="panel">
-        <h2>表示</h2>
-        <div class="field">
-          <label for="displayMode">Overlay 表示</label>
-          <select id="displayMode">
-            <option value="both">Both</option>
-            <option value="map">Map</option>
-            <option value="redlines">RedLines</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="opacityRange">Opacity</label>
-          <input id="opacityRange" type="range" min="0.05" max="1" step="0.05" value="0.72" />
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>操作モード</h2>
-        <div class="mode-grid">
-          <button class="mode-button" data-mode="pair2">2点合わせ</button>
-          <button class="mode-button" data-mode="pair4">4点合わせ</button>
-          <button class="mode-button" data-mode="move">Move</button>
-          <button class="mode-button" data-mode="fine">Fine-tune</button>
-        </div>
-        <div class="button-row" style="margin-top:10px;">
-          <button id="undoPointButton" class="secondary">Undo last point</button>
-          <button id="clearPointsButton" class="secondary">Clear points</button>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>保存</h2>
-        <div class="button-row">
-          <button id="saveButton" class="primary">Save</button>
-          <button id="copyJsonButton" class="secondary">Copy JSON</button>
-        </div>
-        <div class="button-row" style="margin-top:8px;">
-          <button id="resetButton" class="secondary">Reset</button>
-          <button id="nextButton" class="secondary">Next Frame</button>
-        </div>
-        <div id="statusText" style="margin-top:10px;"></div>
-        <div id="saveHint" style="margin-top:8px;"></div>
-      </section>
-
-      <section class="panel">
-        <h2>JSON Preview</h2>
+      <section class="pane">
+        <div class="paneTitle">Mapbox</div>
+        <div id="map"></div>
+        <div id="rightError"></div>
         <pre id="jsonPreview"></pre>
       </section>
-
-      <section class="panel">
-        <h2>Hotkeys</h2>
-        <div class="hint">矢印: 少し移動
-Shift + 矢印: 大きく移動
-Q / E: 回転
-- / +: 縮小 / 拡大
-R: Reset
-S: Save
-1 / 2 / 3: Map / RedLines / Both</div>
-      </section>
-    </aside>
-
-    <main id="mapWrap">
-      <div id="map"></div>
-      <canvas id="overlayCanvas"></canvas>
-      <div id="corner0" class="overlay-handle corner-handle" data-index="0"></div>
-      <div id="corner1" class="overlay-handle corner-handle" data-index="1"></div>
-      <div id="corner2" class="overlay-handle corner-handle" data-index="2"></div>
-      <div id="corner3" class="overlay-handle corner-handle" data-index="3"></div>
-      <div id="centerHandle" class="overlay-handle">+</div>
-      <div id="error"></div>
-      <div id="mapMessage"></div>
-    </main>
+    </div>
   </div>
 
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
@@ -785,95 +631,80 @@ S: Save
   </script>
   <script>
     const config = window.__OVERLAY_GEOREF_CONFIG__;
-    const cornersOrder = ['top_left', 'top_right', 'bottom_right', 'bottom_left'];
-    const MODE_META = {
-      pair2: { label: '2点合わせ', requiredPairs: 2, transformLabel: 'similarity' },
-      pair4: { label: '4点合わせ', requiredPairs: 4, transformLabel: 'projective' },
-      move: { label: 'Move', requiredPairs: 0, transformLabel: 'move' },
-      fine: { label: 'Fine-tune', requiredPairs: 0, transformLabel: 'fine' },
+    const MAPBOX_SCALE = 0.01;
+    const EARTH_RADIUS_M = 6378137.0;
+    const paneIds = { pdf: 'pdf', map: 'map' };
+    const ui = {
+      frameSelect: document.getElementById('frameSelect'),
+      modeSelect: document.getElementById('modeSelect'),
+      undoButton: document.getElementById('undoButton'),
+      clearButton: document.getElementById('clearButton'),
+      previewButton: document.getElementById('previewButton'),
+      saveButton: document.getElementById('saveButton'),
+      nextButton: document.getElementById('nextButton'),
+      stepText: document.getElementById('stepText'),
+      metrics: document.getElementById('metrics'),
+      notice: document.getElementById('notice'),
+      pdfCanvas: document.getElementById('pdfCanvas'),
+      rightError: document.getElementById('rightError'),
+      jsonPreview: document.getElementById('jsonPreview'),
     };
+    const pdfCtx = ui.pdfCanvas.getContext('2d');
     const imageCache = new Map();
     const frameState = new Map();
-    const ui = {
-      frameOrder: document.getElementById('frameOrder'),
-      frameSelect: document.getElementById('frameSelect'),
-      displayMode: document.getElementById('displayMode'),
-      opacityRange: document.getElementById('opacityRange'),
-      saveButton: document.getElementById('saveButton'),
-      copyJsonButton: document.getElementById('copyJsonButton'),
-      resetButton: document.getElementById('resetButton'),
-      nextButton: document.getElementById('nextButton'),
-      undoPointButton: document.getElementById('undoPointButton'),
-      clearPointsButton: document.getElementById('clearPointsButton'),
-      modeButtons: Array.from(document.querySelectorAll('.mode-button')),
-      modeLabel: document.getElementById('modeLabel'),
-      stepText: document.getElementById('stepText'),
-      statusText: document.getElementById('statusText'),
-      saveHint: document.getElementById('saveHint'),
-      frameInfo: document.getElementById('frameInfo'),
-      jsonPreview: document.getElementById('jsonPreview'),
-      mapWrap: document.getElementById('mapWrap'),
-      canvas: document.getElementById('overlayCanvas'),
-      cornerHandles: [0, 1, 2, 3].map((index) => document.getElementById(`corner${index}`)),
-      centerHandle: document.getElementById('centerHandle'),
-      error: document.getElementById('error'),
-      mapMessage: document.getElementById('mapMessage'),
-    };
-
-    const ctx = ui.canvas.getContext('2d');
-    let currentFrameId = config.default_frame_id || (config.frames[0] && config.frames[0].frame_id) || '';
-    let currentMode = 'pair2';
+    let currentFrameId = '';
     let map = null;
-    let pointerState = null;
+    let mapReady = false;
 
     function clamp(value, low, high) {
       return Math.max(low, Math.min(high, value));
     }
 
-    function showError(message) {
-      ui.error.style.display = 'block';
-      ui.error.textContent = message;
+    function showRightError(message) {
+      ui.rightError.style.display = 'block';
+      ui.rightError.textContent = message;
     }
 
-    function clearError() {
-      ui.error.style.display = 'none';
-      ui.error.textContent = '';
-    }
-
-    function frameById(frameId) {
-      return config.frames.find((frame) => frame.frame_id === frameId) || null;
+    function clearRightError() {
+      ui.rightError.style.display = 'none';
+      ui.rightError.textContent = '';
     }
 
     function validateConfig() {
       if (!config || !Array.isArray(config.frames)) {
-        showError('manifest 読み込みエラー: frames 配列がありません。');
+        ui.stepText.textContent = 'manifest の読み込みに失敗しました';
+        ui.notice.textContent = 'frames 配列がありません';
         return false;
       }
       if (config.frames.length === 0) {
-        showError('frame_manifest.json の frames が空です。build_overlay_georef_editor.py を再実行してください。');
-        ui.statusText.textContent = 'frame count = 0';
-        ui.stepText.textContent = 'frames が空のため表示できません。';
+        ui.stepText.textContent = 'frame がありません';
+        ui.notice.textContent = 'frame_manifest.json の frames が空です';
         return false;
       }
       return true;
     }
 
     function sortedFrames() {
-      const frames = [...config.frames];
-      if (ui.frameOrder.value === 'page') {
-        frames.sort((a, b) => (a.page_no - b.page_no) || a.frame_id.localeCompare(b.frame_id));
-      } else {
-        frames.sort((a, b) => {
-          const diff = Number(b.priority_score || 0) - Number(a.priority_score || 0);
-          return diff || ((a.page_no - b.page_no) || a.frame_id.localeCompare(b.frame_id));
-        });
-      }
-      return frames;
+      return [...config.frames].sort((a, b) => {
+        const diff = Number(b.priority_score || 0) - Number(a.priority_score || 0);
+        return diff || (a.page_no - b.page_no) || a.frame_id.localeCompare(b.frame_id);
+      });
     }
 
-    function repopulateFrameSelect() {
+    function frameById(frameId) {
+      return config.frames.find((frame) => frame.frame_id === frameId) || null;
+    }
+
+    function requiredPoints() {
+      return ui.modeSelect.value === 'projective' ? 4 : 2;
+    }
+
+    function currentTransformType() {
+      return ui.modeSelect.value;
+    }
+
+    function populateFrameSelect() {
       const frames = sortedFrames();
-      const selected = currentFrameId || (frames[0] && frames[0].frame_id) || '';
       ui.frameSelect.innerHTML = '';
       for (const frame of frames) {
         const option = document.createElement('option');
@@ -881,149 +712,195 @@ S: Save
         option.textContent = `${frame.page_no} / ${frame.frame_id} / score=${Number(frame.priority_score || 0).toFixed(1)}`;
         ui.frameSelect.appendChild(option);
       }
-      const preferred = (
-        (selected && frames.some((frame) => frame.frame_id === selected) && selected)
-        || (config.default_frame_id && frames.some((frame) => frame.frame_id === config.default_frame_id) && config.default_frame_id)
-        || (frames[0] && frames[0].frame_id)
-        || ''
-      );
-      ui.frameSelect.value = preferred;
-      currentFrameId = preferred;
-    }
-
-    function cornersFromSaved(savedCorners) {
-      return cornersOrder.map((name) => savedCorners[name].slice());
-    }
-
-    function getFrameCenter(corners) {
-      const lon = corners.reduce((sum, point) => sum + point[0], 0) / corners.length;
-      const lat = corners.reduce((sum, point) => sum + point[1], 0) / corners.length;
-      return [lon, lat];
-    }
-
-    function metersPerPixel(lat, zoom) {
-      return 156543.03392 * Math.cos((lat * Math.PI) / 180) / Math.pow(2, zoom);
-    }
-
-    function offsetLonLat(center, dxMeters, dyMeters) {
-      const lat = center[1] + (dyMeters / 6378137.0) * (180 / Math.PI);
-      const lon = center[0] + (dxMeters / (6378137.0 * Math.cos((center[1] * Math.PI) / 180))) * (180 / Math.PI);
-      return [lon, lat];
-    }
-
-    function cornersFromView(frame) {
-      const center = frame.initial_center || [133.5, 33.8];
-      const zoom = Number(frame.initial_zoom || 12);
-      const mpp = metersPerPixel(center[1], zoom);
-      const widthMeters = frame.image_width_px * mpp;
-      const heightMeters = frame.image_height_px * mpp;
-      const halfW = widthMeters / 2;
-      const halfH = heightMeters / 2;
-      return [
-        offsetLonLat(center, -halfW, halfH),
-        offsetLonLat(center, halfW, halfH),
-        offsetLonLat(center, halfW, -halfH),
-        offsetLonLat(center, -halfW, -halfH),
-      ];
-    }
-
-    function initialFrameCorners(frame) {
-      if (frame.saved_corners) {
-        return cornersFromSaved(frame.saved_corners);
-      }
-      if (frame.initial_corners) {
-        return cornersFromSaved(frame.initial_corners);
-      }
-      return cornersFromView(frame);
+      currentFrameId = config.default_frame_id || frames[0].frame_id;
+      ui.frameSelect.value = currentFrameId;
     }
 
     function getState(frame) {
       if (!frameState.has(frame.frame_id)) {
         frameState.set(frame.frame_id, {
-          corners: initialFrameCorners(frame),
+          controlPoints: [],
+          preview: null,
           dirty: false,
-          saveState: frame.has_saved_georef ? 'saved' : 'unsaved',
-          alignmentPairs: [],
-          lastAppliedMode: frame.saved_corners ? 'saved_georef' : (frame.initial_transform_source || 'fallback_view'),
-          saveNotice: frame.has_saved_georef ? '既存保存JSONを読込済み' : '',
+          notice: frame.has_saved_georef ? '既存 saved georef あり' : '',
         });
       }
       return frameState.get(frame.frame_id);
     }
 
-    function resizeCanvas() {
-      const rect = ui.canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      ui.canvas.width = Math.round(rect.width * dpr);
-      ui.canvas.height = Math.round(rect.height * dpr);
-      ui.canvas.style.width = `${rect.width}px`;
-      ui.canvas.style.height = `${rect.height}px`;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    function completedPairs(state) {
+      return state.controlPoints.filter((pair) => pair.pdf_px && pair.lonlat).length;
     }
 
-    function projectedCorners(corners) {
-      return corners.map((point) => map.project(point));
-    }
-
-    function pointInPolygon(point, polygon) {
-      let inside = false;
-      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-        const xi = polygon[i].x;
-        const yi = polygon[i].y;
-        const xj = polygon[j].x;
-        const yj = polygon[j].y;
-        const intersect = ((yi > point.y) !== (yj > point.y))
-          && (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || 1e-9) + xi);
-        if (intersect) {
-          inside = !inside;
-        }
+    function expectedSide(state) {
+      const needed = requiredPoints();
+      const completed = completedPairs(state);
+      if (completed >= needed) {
+        return 'done';
       }
-      return inside;
+      const last = state.controlPoints[state.controlPoints.length - 1];
+      if (!last || (last.pdf_px && last.lonlat)) {
+        return 'pdf';
+      }
+      return 'map';
     }
 
-    function drawPolygonOutline(screenCorners) {
+    function updateStepText(frame, state) {
+      const side = expectedSide(state);
+      const done = completedPairs(state);
+      const needed = requiredPoints();
+      if (side === 'done') {
+        ui.stepText.textContent = `${needed}組の対応点が揃いました。Preview または Save できます`;
+      } else if (side === 'pdf') {
+        ui.stepText.textContent = `次: 左の PDF をクリックしてください (${done + 1}/${needed})`;
+      } else {
+        ui.stepText.textContent = `次: 右の Mapbox をクリックしてください (${done + 1}/${needed})`;
+      }
+      const rmse = state.preview && Number.isFinite(state.preview.rmse_m) ? `${state.preview.rmse_m.toFixed(2)} m` : '-';
+      ui.metrics.innerHTML = `<strong>mode</strong>: ${currentTransformType()} / <strong>pairs</strong>: ${done}/${needed} / <strong>RMSE</strong>: ${rmse}`;
+      ui.notice.textContent = state.notice || '';
+    }
+
+    async function loadImage(url) {
+      if (imageCache.has(url)) {
+        return imageCache.get(url);
+      }
+      const promise = new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error(`画像を読み込めません: ${url}`));
+        image.src = url;
+      });
+      imageCache.set(url, promise);
+      return promise;
+    }
+
+    function resizePdfCanvas() {
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      ui.pdfCanvas.width = Math.round(rect.width * dpr);
+      ui.pdfCanvas.height = Math.round(rect.height * dpr);
+      ui.pdfCanvas.style.width = `${rect.width}px`;
+      ui.pdfCanvas.style.height = `${rect.height}px`;
+      pdfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return rect;
+    }
+
+    function fitImageRect(containerWidth, containerHeight, imageWidth, imageHeight) {
+      const scale = Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
+      const width = imageWidth * scale;
+      const height = imageHeight * scale;
+      return {
+        x: (containerWidth - width) / 2,
+        y: (containerHeight - height) / 2,
+        width,
+        height,
+        scale,
+      };
+    }
+
+    function drawMarker(ctx, x, y, label, fillColor, strokeColor, textColor) {
       ctx.save();
       ctx.beginPath();
-      ctx.moveTo(screenCorners[0].x, screenCorners[0].y);
-      for (let i = 1; i < screenCorners.length; i += 1) {
-        ctx.lineTo(screenCorners[i].x, screenCorners[i].y);
-      }
-      ctx.closePath();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(185,28,28,0.96)';
-      ctx.setLineDash([12, 8]);
+      ctx.arc(x, y, 11, 0, Math.PI * 2);
+      ctx.fillStyle = fillColor;
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 3;
+      ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = textColor;
+      ctx.font = '700 12px ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(label), x, y + 0.5);
       ctx.restore();
+    }
+
+    function pdfRectForFrame(frame, rect) {
+      return fitImageRect(rect.width, rect.height, frame.image_width_px, frame.image_height_px);
+    }
+
+    function pdfPointToCanvas(pdfRect, point) {
+      return {
+        x: pdfRect.x + (point[0] * pdfRect.scale),
+        y: pdfRect.y + (point[1] * pdfRect.scale),
+      };
+    }
+
+    function canvasPointToPdf(pdfRect, x, y) {
+      return [
+        (x - pdfRect.x) / pdfRect.scale,
+        (y - pdfRect.y) / pdfRect.scale,
+      ];
+    }
+
+    async function drawPdfPane() {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      const rect = resizePdfCanvas();
+      pdfCtx.clearRect(0, 0, rect.width, rect.height);
+      pdfCtx.fillStyle = '#eef2f7';
+      pdfCtx.fillRect(0, 0, rect.width, rect.height);
+      const pdfRect = pdfRectForFrame(frame, rect);
+
+      try {
+        const baseImage = await loadImage(frame.image_path);
+        pdfCtx.drawImage(baseImage, pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
+        const redImage = await loadImage(frame.redlines_path);
+        pdfCtx.globalAlpha = 0.95;
+        pdfCtx.drawImage(redImage, pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
+        pdfCtx.globalAlpha = 1;
+      } catch (error) {
+        pdfCtx.fillStyle = '#991b1b';
+        pdfCtx.font = '700 14px ui-sans-serif, system-ui, sans-serif';
+        pdfCtx.fillText(error.message, 20, 40);
+      }
+
+      pdfCtx.lineWidth = 3;
+      pdfCtx.strokeStyle = 'rgba(29,78,216,0.95)';
+      pdfCtx.strokeRect(pdfRect.x, pdfRect.y, pdfRect.width, pdfRect.height);
+
+      state.controlPoints.forEach((pair, index) => {
+        if (!pair.pdf_px) return;
+        const point = pdfPointToCanvas(pdfRect, pair.pdf_px);
+        drawMarker(pdfCtx, point.x, point.y, index + 1, 'rgba(29,78,216,0.95)', '#ffffff', '#ffffff');
+      });
+
+      return pdfRect;
+    }
+
+    function localMeters(lonlat, refLonLat) {
+      const refLatRad = refLonLat[1] * Math.PI / 180;
+      return [
+        EARTH_RADIUS_M * ((lonlat[0] - refLonLat[0]) * Math.PI / 180) * Math.cos(refLatRad),
+        EARTH_RADIUS_M * ((lonlat[1] - refLonLat[1]) * Math.PI / 180),
+      ];
+    }
+
+    function metersToLonLat(point, refLonLat) {
+      const refLatRad = refLonLat[1] * Math.PI / 180;
+      return [
+        refLonLat[0] + (point[0] / (EARTH_RADIUS_M * Math.cos(refLatRad))) * 180 / Math.PI,
+        refLonLat[1] + (point[1] / EARTH_RADIUS_M) * 180 / Math.PI,
+      ];
     }
 
     function solveLinearSystem(matrix, values) {
       const n = matrix.length;
-      const a = matrix.map((row, index) => [...row, values[index]]);
+      const a = matrix.map((row, idx) => [...row, values[idx]]);
       for (let col = 0; col < n; col += 1) {
         let pivot = col;
         for (let row = col + 1; row < n; row += 1) {
-          if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
-            pivot = row;
-          }
+          if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
         }
-        if (Math.abs(a[pivot][col]) < 1e-9) {
-          return null;
-        }
-        if (pivot !== col) {
-          [a[pivot], a[col]] = [a[col], a[pivot]];
-        }
-        const divisor = a[col][col];
-        for (let k = col; k <= n; k += 1) {
-          a[col][k] /= divisor;
-        }
+        if (Math.abs(a[pivot][col]) < 1e-9) return null;
+        if (pivot !== col) [a[pivot], a[col]] = [a[col], a[pivot]];
+        const div = a[col][col];
+        for (let k = col; k <= n; k += 1) a[col][k] /= div;
         for (let row = 0; row < n; row += 1) {
-          if (row === col) {
-            continue;
-          }
+          if (row === col) continue;
           const factor = a[row][col];
-          for (let k = col; k <= n; k += 1) {
-            a[row][k] -= factor * a[col][k];
-          }
+          for (let k = col; k <= n; k += 1) a[row][k] -= factor * a[col][k];
         }
       }
       return a.map((row) => row[n]);
@@ -1044,223 +921,74 @@ S: Save
     }
 
     function applyProjectivePoint(params, point) {
-      if (!params) {
-        return null;
-      }
       const [h11, h12, h13, h21, h22, h23, h31, h32] = params;
       const [x, y] = point;
       const denom = (h31 * x) + (h32 * y) + 1;
-      if (Math.abs(denom) < 1e-9) {
-        return null;
-      }
+      if (Math.abs(denom) < 1e-9) return null;
       return [
         ((h11 * x) + (h12 * y) + h13) / denom,
         ((h21 * x) + (h22 * y) + h23) / denom,
       ];
     }
 
-    function solveAffine(src, dst) {
-      const [[sx1, sy1], [sx2, sy2], [sx3, sy3]] = src;
-      const [[dx1, dy1], [dx2, dy2], [dx3, dy3]] = dst;
-      const denom = (sx1 * (sy2 - sy3)) + (sx2 * (sy3 - sy1)) + (sx3 * (sy1 - sy2));
-      if (Math.abs(denom) < 1e-9) {
-        return null;
-      }
-      const a = ((dx1 * (sy2 - sy3)) + (dx2 * (sy3 - sy1)) + (dx3 * (sy1 - sy2))) / denom;
-      const b = ((dy1 * (sy2 - sy3)) + (dy2 * (sy3 - sy1)) + (dy3 * (sy1 - sy2))) / denom;
-      const c = ((dx1 * (sx3 - sx2)) + (dx2 * (sx1 - sx3)) + (dx3 * (sx2 - sx1))) / denom;
-      const d = ((dy1 * (sx3 - sx2)) + (dy2 * (sx1 - sx3)) + (dy3 * (sx2 - sx1))) / denom;
-      const e = ((dx1 * ((sx2 * sy3) - (sx3 * sy2))) + (dx2 * ((sx3 * sy1) - (sx1 * sy3))) + (dx3 * ((sx1 * sy2) - (sx2 * sy1)))) / denom;
-      const f = ((dy1 * ((sx2 * sy3) - (sx3 * sy2))) + (dy2 * ((sx3 * sy1) - (sx1 * sy3))) + (dy3 * ((sx1 * sy2) - (sx2 * sy1)))) / denom;
-      return [a, b, c, d, e, f];
-    }
-
-    function drawTriangleImage(image, srcTriangle, dstTriangle, opacity) {
-      const transform = solveAffine(srcTriangle, dstTriangle);
-      if (!transform) {
-        return;
-      }
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(dstTriangle[0][0], dstTriangle[0][1]);
-      ctx.lineTo(dstTriangle[1][0], dstTriangle[1][1]);
-      ctx.lineTo(dstTriangle[2][0], dstTriangle[2][1]);
-      ctx.closePath();
-      ctx.clip();
-      ctx.globalAlpha = opacity;
-      ctx.setTransform(...transform);
-      ctx.drawImage(image, 0, 0);
-      ctx.restore();
-      const dpr = window.devicePixelRatio || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-
-    function drawWarpedImage(image, screenCorners, opacity) {
-      const width = image.naturalWidth || image.width;
-      const height = image.naturalHeight || image.height;
-      const dst = screenCorners.map((point) => [point.x, point.y]);
-      drawTriangleImage(image, [[0, 0], [width, 0], [width, height]], [dst[0], dst[1], dst[2]], opacity);
-      drawTriangleImage(image, [[0, 0], [width, height], [0, height]], [dst[0], dst[2], dst[3]], opacity);
-    }
-
-    async function loadImage(url) {
-      if (imageCache.has(url)) {
-        return imageCache.get(url);
-      }
-      const promise = new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error(`画像を読み込めません: ${url}`));
-        image.src = url;
-      });
-      imageCache.set(url, promise);
-      return promise;
-    }
-
-    function drawFramedImage(image, opacity = 1) {
-      const rect = ui.canvas.getBoundingClientRect();
-      const width = image.naturalWidth || image.width;
-      const height = image.naturalHeight || image.height;
-      const scale = Math.min(rect.width / width, rect.height / height);
-      const drawWidth = width * scale;
-      const drawHeight = height * scale;
-      const x = (rect.width - drawWidth) / 2;
-      const y = (rect.height - drawHeight) / 2;
-      ctx.save();
-      ctx.globalAlpha = opacity;
-      ctx.drawImage(image, x, y, drawWidth, drawHeight);
-      ctx.restore();
-      ctx.save();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(185,28,28,0.9)';
-      ctx.setLineDash([10, 6]);
-      ctx.strokeRect(x, y, drawWidth, drawHeight);
-      ctx.restore();
-    }
-
-    async function renderStaticPreview(frame, state) {
-      resizeCanvas();
-      ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
-      const rect = ui.canvas.getBoundingClientRect();
-      ctx.save();
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, 0, rect.width, rect.height);
-      ctx.restore();
-
-      try {
-        if (!frame.image_path) {
-          throw new Error(`image_path が空です: ${frame.frame_id}`);
-        }
-        const displayMode = ui.displayMode.value;
-        if (displayMode === 'map' || displayMode === 'both') {
-          const image = await loadImage(frame.image_path);
-          drawFramedImage(image, Number(ui.opacityRange.value || 0.72));
-        }
-        if (displayMode === 'redlines' || displayMode === 'both') {
-          if (!frame.redlines_path) {
-            throw new Error(`redlines_path が空です: ${frame.frame_id}`);
-          }
-          const image = await loadImage(frame.redlines_path);
-          drawFramedImage(image, displayMode === 'both' ? 0.95 : Number(ui.opacityRange.value || 0.72));
-        }
-      } catch (error) {
-        showError(error.message);
-      }
-      updateSidebar(frame, state);
-      ui.mapMessage.textContent = [
-        `page ${frame.page_no} / ${frame.frame_id}`,
-        'Mapbox が未初期化のため、静的プレビューのみ表示しています。',
-      ].join('\\n');
-    }
-
-    function pointerPosition(event) {
-      const rect = ui.canvas.getBoundingClientRect();
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    }
-
-    function screenToLonLat(point) {
-      const lngLat = map.unproject([point.x, point.y]);
-      return [lngLat.lng, lngLat.lat];
-    }
-
-    function lonLatToLocal(point, ref) {
-      const refLatRad = (ref[1] * Math.PI) / 180;
-      return [
-        6378137.0 * ((point[0] - ref[0]) * Math.PI / 180) * Math.cos(refLatRad),
-        6378137.0 * ((point[1] - ref[1]) * Math.PI / 180),
-      ];
-    }
-
-    function localToLonLat(point, ref) {
-      const refLatRad = (ref[1] * Math.PI) / 180;
-      return [
-        ref[0] + ((point[0] / (6378137.0 * Math.cos(refLatRad))) * 180 / Math.PI),
-        ref[1] + ((point[1] / 6378137.0) * 180 / Math.PI),
-      ];
-    }
-
     function fitSimilarityFromTwoPairs(pairs) {
-      const s1 = [pairs[0].pdf.x, pairs[0].pdf.y];
-      const s2 = [pairs[1].pdf.x, pairs[1].pdf.y];
+      const src1 = pairs[0].pdf_px;
+      const src2 = pairs[1].pdf_px;
       const ref = [
-        (pairs[0].map[0] + pairs[1].map[0]) / 2,
-        (pairs[0].map[1] + pairs[1].map[1]) / 2,
+        (pairs[0].lonlat[0] + pairs[1].lonlat[0]) / 2,
+        (pairs[0].lonlat[1] + pairs[1].lonlat[1]) / 2,
       ];
-      const t1 = lonLatToLocal(pairs[0].map, ref);
-      const t2 = lonLatToLocal(pairs[1].map, ref);
-      const sv = [s2[0] - s1[0], s2[1] - s1[1]];
-      const tv = [t2[0] - t1[0], t2[1] - t1[1]];
+      const dst1 = localMeters(pairs[0].lonlat, ref);
+      const dst2 = localMeters(pairs[1].lonlat, ref);
+      const sv = [src2[0] - src1[0], src2[1] - src1[1]];
+      const tv = [dst2[0] - dst1[0], dst2[1] - dst1[1]];
       const sNorm = Math.hypot(sv[0], sv[1]);
       const tNorm = Math.hypot(tv[0], tv[1]);
       if (sNorm < 1e-6 || tNorm < 1e-6) {
-        throw new Error('2点が近すぎるため similarity を計算できません。');
+        throw new Error('2点が近すぎるため similarity 変換を計算できません。');
       }
       const scale = tNorm / sNorm;
       const angle = Math.atan2(tv[1], tv[0]) - Math.atan2(sv[1], sv[0]);
       const cosA = Math.cos(angle);
       const sinA = Math.sin(angle);
-      const srcCenter = [(s1[0] + s2[0]) / 2, (s1[1] + s2[1]) / 2];
-      const tgtCenter = [(t1[0] + t2[0]) / 2, (t1[1] + t2[1]) / 2];
+      const srcCenter = [(src1[0] + src2[0]) / 2, (src1[1] + src2[1]) / 2];
+      const dstCenter = [(dst1[0] + dst2[0]) / 2, (dst1[1] + dst2[1]) / 2];
       const rotatedCenter = [
         scale * ((cosA * srcCenter[0]) - (sinA * srcCenter[1])),
         scale * ((sinA * srcCenter[0]) + (cosA * srcCenter[1])),
       ];
-      const translation = [
-        tgtCenter[0] - rotatedCenter[0],
-        tgtCenter[1] - rotatedCenter[1],
-      ];
+      const translation = [dstCenter[0] - rotatedCenter[0], dstCenter[1] - rotatedCenter[1]];
       return {
-        ref,
+        refLonLat: ref,
         apply(point) {
-          const rx = scale * ((cosA * point[0]) - (sinA * point[1])) + translation[0];
-          const ry = scale * ((sinA * point[0]) + (cosA * point[1])) + translation[1];
-          return localToLonLat([rx, ry], ref);
+          const local = [
+            scale * ((cosA * point[0]) - (sinA * point[1])) + translation[0],
+            scale * ((sinA * point[0]) + (cosA * point[1])) + translation[1],
+          ];
+          return metersToLonLat(local, ref);
         },
       };
     }
 
-    function fitProjectiveFromFourPairs(pairs) {
-      const ref = pairs.reduce((acc, pair) => [acc[0] + pair.map[0], acc[1] + pair.map[1]], [0, 0]).map((value) => value / pairs.length);
-      const src = pairs.map((pair) => [pair.pdf.x, pair.pdf.y]);
-      const dst = pairs.map((pair) => lonLatToLocal(pair.map, ref));
+    function fitProjectiveFromPairs(pairs) {
+      const ref = pairs.reduce((acc, pair) => [acc[0] + pair.lonlat[0], acc[1] + pair.lonlat[1]], [0, 0]).map((value) => value / pairs.length);
+      const src = pairs.map((pair) => pair.pdf_px);
+      const dst = pairs.map((pair) => localMeters(pair.lonlat, ref));
       const params = fitProjective(src, dst);
       if (!params) {
-        throw new Error('4点から projective 変換を計算できません。');
+        throw new Error('projective 変換を計算できません。');
       }
       return {
-        ref,
-        params,
+        refLonLat: ref,
         apply(point) {
-          const result = applyProjectivePoint(params, point);
-          if (!result) {
-            throw new Error('projective 変換結果が不正です。');
-          }
-          return localToLonLat(result, ref);
+          const local = applyProjectivePoint(params, point);
+          if (!local) throw new Error('projective 変換結果が不正です。');
+          return metersToLonLat(local, ref);
         },
       };
     }
 
-    function imageCornerPixels(frame) {
+    function imageCorners(frame) {
       return [
         [0, 0],
         [frame.image_width_px, 0],
@@ -1269,92 +997,101 @@ S: Save
       ];
     }
 
-    function cornersFromTransform(frame, transformer) {
-      return imageCornerPixels(frame).map((point) => transformer.apply(point));
+    function routeCoordToPdfPx(frame, coord) {
+      const bbox = frame.pdf_bbox;
+      const pdfX = coord[0] / MAPBOX_SCALE;
+      const pdfY = -coord[1] / MAPBOX_SCALE;
+      const scaleX = frame.image_width_px / (bbox.x1 - bbox.x0);
+      const scaleY = frame.image_height_px / (bbox.y1 - bbox.y0);
+      return [
+        (pdfX - bbox.x0) * scaleX,
+        (pdfY - bbox.y0) * scaleY,
+      ];
     }
 
-    function getHomographies(frame, corners) {
-      const dst = projectedCorners(corners).map((point) => [point.x, point.y]);
-      const src = imageCornerPixels(frame);
+    function transformRouteGeometry(frame, geometry, transformer) {
+      const transformLine = (line) => line.map((coord) => transformer.apply(routeCoordToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
+      if (geometry.type === 'LineString') {
+        return { type: 'LineString', coordinates: transformLine(geometry.coordinates) };
+      }
+      return { type: 'MultiLineString', coordinates: geometry.coordinates.map(transformLine) };
+    }
+
+    function buildPreview(frame, state) {
+      const pairs = state.controlPoints.filter((pair) => pair.pdf_px && pair.lonlat).slice(0, requiredPoints());
+      if (pairs.length < requiredPoints()) {
+        throw new Error(`${requiredPoints()}組の対応点が必要です。`);
+      }
+      const transformer = currentTransformType() === 'similarity'
+        ? fitSimilarityFromTwoPairs(pairs)
+        : fitProjectiveFromPairs(pairs);
+
+      const transformedControl = [];
+      const residuals = [];
+      let sumSq = 0;
+      for (let index = 0; index < pairs.length; index += 1) {
+        const predicted = transformer.apply(pairs[index].pdf_px);
+        transformedControl.push({ label: String(index + 1), lonlat: predicted });
+        const targetMeters = localMeters(pairs[index].lonlat, transformer.refLonLat);
+        const predMeters = localMeters(predicted, transformer.refLonLat);
+        const error = Math.hypot(predMeters[0] - targetMeters[0], predMeters[1] - targetMeters[1]);
+        sumSq += error * error;
+        residuals.push({
+          label: String(index + 1),
+          coordinates: [predicted, pairs[index].lonlat],
+          error_m: error,
+        });
+      }
+      const rmse = Math.sqrt(sumSq / pairs.length);
+      const corners = imageCorners(frame).map((point) => transformer.apply(point).map((value) => Number(value.toFixed(7))));
+      const transformedRoutes = {
+        type: 'FeatureCollection',
+        features: frame.route_geojson.features.map((feature) => ({
+          type: 'Feature',
+          geometry: transformRouteGeometry(frame, feature.geometry, transformer),
+          properties: { ...feature.properties },
+        })),
+      };
       return {
-        sourceToScreen: fitProjective(src, dst),
-        screenToSource: fitProjective(dst, src),
+        transform_type: currentTransformType(),
+        rmse_m: rmse,
+        transformed_routes: transformedRoutes,
+        transformed_control_points: transformedControl,
+        residuals,
+        corners_lonlat: {
+          top_left: corners[0],
+          top_right: corners[1],
+          bottom_right: corners[2],
+          bottom_left: corners[3],
+        },
       };
     }
 
-    function drawMarker(point, label, color, fill = true) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 11, 0, Math.PI * 2);
-      ctx.fillStyle = fill ? color : 'rgba(255,255,255,0.92)';
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = fill ? 'white' : color;
-      ctx.font = '700 12px ui-sans-serif, system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(label), point.x, point.y + 0.5);
-      ctx.restore();
-    }
-
-    function drawAlignmentMarkers(frame, state, sourceToScreen) {
-      state.alignmentPairs.forEach((pair, index) => {
-        if (pair.pdf) {
-          const pdfScreen = applyProjectivePoint(sourceToScreen, [pair.pdf.x, pair.pdf.y]);
-          if (pdfScreen) {
-            drawMarker({ x: pdfScreen[0], y: pdfScreen[1] }, index + 1, 'rgba(37,99,235,0.98)', true);
-          }
-        }
-        if (pair.map) {
-          const mapScreen = map.project(pair.map);
-          drawMarker({ x: mapScreen.x, y: mapScreen.y }, index + 1, 'rgba(245,158,11,0.98)', false);
-        }
-        if (pair.pdf && pair.map) {
-          const pdfScreen = applyProjectivePoint(sourceToScreen, [pair.pdf.x, pair.pdf.y]);
-          const mapScreen = map.project(pair.map);
-          if (pdfScreen) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(pdfScreen[0], pdfScreen[1]);
-            ctx.lineTo(mapScreen.x, mapScreen.y);
-            ctx.strokeStyle = 'rgba(15,23,42,0.45)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 5]);
-            ctx.stroke();
-            ctx.restore();
-          }
-        }
-      });
-    }
-
-    function updateHandles(screenCorners) {
-      const center = screenCorners.reduce((acc, point) => ({ x: acc.x + point.x / 4, y: acc.y + point.y / 4 }), { x: 0, y: 0 });
-      ui.cornerHandles.forEach((handle, index) => {
-        handle.style.left = `${screenCorners[index].x}px`;
-        handle.style.top = `${screenCorners[index].y}px`;
-        handle.classList.toggle('active', currentMode === 'fine');
-      });
-      ui.centerHandle.style.left = `${center.x}px`;
-      ui.centerHandle.style.top = `${center.y}px`;
-      ui.centerHandle.style.opacity = currentMode === 'move' ? '1' : '0.72';
-    }
-
-    function buildSavePayload(frame, corners) {
+    function buildSavePayload(frame, state) {
+      const preview = state.preview;
+      if (!preview) {
+        throw new Error('Preview を先に実行してください。');
+      }
       return {
         page_no: frame.page_no,
         frame_id: frame.frame_id,
-        image_width_px: frame.image_width_px,
-        image_height_px: frame.image_height_px,
-        pdf_frame_bbox: frame.pdf_bbox,
-        corners_lonlat: {
-          top_left: corners[0].map((value) => Number(value.toFixed(7))),
-          top_right: corners[1].map((value) => Number(value.toFixed(7))),
-          bottom_right: corners[2].map((value) => Number(value.toFixed(7))),
-          bottom_left: corners[3].map((value) => Number(value.toFixed(7))),
-        },
-        transform_type: 'projective',
+        transform_type: preview.transform_type,
+        control_points: state.controlPoints
+          .filter((pair) => pair.pdf_px && pair.lonlat)
+          .slice(0, requiredPoints())
+          .map((pair, index) => ({
+            index: index + 1,
+            pdf_image_px: {
+              x: Number(pair.pdf_px[0].toFixed(3)),
+              y: Number(pair.pdf_px[1].toFixed(3)),
+            },
+            map_lonlat: [
+              Number(pair.lonlat[0].toFixed(7)),
+              Number(pair.lonlat[1].toFixed(7)),
+            ],
+          })),
+        corners_lonlat: preview.corners_lonlat,
+        rmse_m: Number(preview.rmse_m.toFixed(3)),
         created_at: new Date().toISOString(),
       };
     }
@@ -1362,300 +1099,174 @@ S: Save
     function downloadJson(filename, data) {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
       URL.revokeObjectURL(url);
     }
 
-    function updateSidebar(frame, state) {
-      const meta = MODE_META[currentMode];
-      const payload = buildSavePayload(frame, state.corners);
-      ui.modeLabel.textContent = meta.label;
-      ui.frameInfo.innerHTML = [
-        `page=${frame.page_no} frame=${frame.frame_id}`,
-        `priority=${Number(frame.priority_score || 0).toFixed(1)} routes=${frame.route_count}`,
-        `initial=${frame.initial_transform_source || 'fallback_view'}`,
-        frame.has_saved_georef ? '<span class="badge">saved georef あり</span>' : '<span class="badge warn">saved georef なし</span>',
-      ].join('<br />');
-      ui.statusText.innerHTML = [
-        state.dirty ? '未保存の変更あり' : (state.saveState === 'saved' ? '保存済み' : '未保存'),
-        `last=${state.lastAppliedMode || 'none'}`,
-      ].join('<br />');
-      ui.saveHint.textContent = `${state.saveNotice || '保存先: data/manual_image_georef/'}\nダウンロード名: ${frame.suggested_download_filename}`;
-      ui.jsonPreview.textContent = JSON.stringify(payload, null, 2);
-      ui.modeButtons.forEach((button) => button.classList.toggle('active', button.dataset.mode === currentMode));
-      ui.stepText.textContent = buildStepText(frame, state);
-      ui.mapMessage.textContent = [
-        `${meta.label} / page ${frame.page_no} / ${frame.frame_id}`,
-        currentMode === 'pair2' || currentMode === 'pair4'
-          ? '青=PDF点  橙=Mapbox点  点を順に対応付けてください'
-          : '中心ハンドルまたはキーボードで調整できます',
-      ].join('\\n');
-    }
-
-    function completePairCount(state) {
-      return state.alignmentPairs.filter((pair) => pair.pdf && pair.map).length;
-    }
-
-    function expectedPairSide(state) {
-      const requiredPairs = MODE_META[currentMode].requiredPairs;
-      if (!requiredPairs) {
-        return null;
-      }
-      if (completePairCount(state) >= requiredPairs) {
-        return 'done';
-      }
-      const last = state.alignmentPairs[state.alignmentPairs.length - 1];
-      if (!last || (last.pdf && last.map)) {
-        return 'pdf';
-      }
-      if (last.pdf && !last.map) {
-        return 'map';
-      }
-      return 'pdf';
-    }
-
-    function buildStepText(frame, state) {
-      const meta = MODE_META[currentMode];
-      if (currentMode === 'move') {
-        return '中央ハンドルをドラッグ、または矢印キー / Q / E / +/- で調整してください。';
-      }
-      if (currentMode === 'fine') {
-        return '四隅ハンドルをドラッグして微調整してください。';
-      }
-      const expected = expectedPairSide(state);
-      const requiredPairs = meta.requiredPairs;
-      const completed = completePairCount(state);
-      if (expected === 'done') {
-        return `${requiredPairs}組の対応点から ${meta.transformLabel} 変換を適用済みです。\nUndo last point または Clear points でやり直せます。`;
-      }
-      const stepIndex = state.alignmentPairs.length * 2 + (expected === 'map' ? 0 : 1);
-      if (expected === 'pdf') {
-        const nextIndex = completed + (state.alignmentPairs.length > completed ? 1 : 1);
-        return `${stepIndex}/${requiredPairs * 2}: PDF overlay上の点 ${nextIndex} をクリックしてください。`;
-      }
-      return `${stepIndex}/${requiredPairs * 2}: Mapbox上の対応点 ${completed + 1} をクリックしてください。`;
-    }
-
-    async function renderOverlay() {
-      if (!map) {
-        const frame = frameById(currentFrameId);
-        if (!frame) {
-          showError(`対象 frame が見つかりません: ${currentFrameId || '(empty)'}`);
-          return;
-        }
-        const state = getState(frame);
-        await renderStaticPreview(frame, state);
-        return;
-      }
-      const frame = frameById(currentFrameId);
-      if (!frame) {
-        showError(`対象 frame が見つかりません: ${currentFrameId || '(empty)'}`);
-        return;
-      }
-      const state = getState(frame);
-      resizeCanvas();
-      ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
-      const screenCorners = projectedCorners(state.corners);
-      const opacity = Number(ui.opacityRange.value || 0.72);
-      const displayMode = ui.displayMode.value;
+    function updateJsonPreview(frame, state) {
       try {
-        if (displayMode === 'map' || displayMode === 'both') {
-          if (!frame.image_path) {
-            throw new Error(`image_path が空です: ${frame.frame_id}`);
-          }
-          const image = await loadImage(frame.image_path);
-          drawWarpedImage(image, screenCorners, opacity);
-        }
-        if (displayMode === 'redlines' || displayMode === 'both') {
-          if (!frame.redlines_path) {
-            throw new Error(`redlines_path が空です: ${frame.frame_id}`);
-          }
-          const image = await loadImage(frame.redlines_path);
-          drawWarpedImage(image, screenCorners, displayMode === 'both' ? Math.min(1, opacity + 0.18) : opacity);
-        }
-      } catch (error) {
-        showError(error.message);
+        ui.jsonPreview.textContent = JSON.stringify(buildSavePayload(frame, state), null, 2);
+      } catch {
+        ui.jsonPreview.textContent = JSON.stringify({
+          page_no: frame.page_no,
+          frame_id: frame.frame_id,
+          transform_type: currentTransformType(),
+          control_points: state.controlPoints,
+        }, null, 2);
       }
-      drawPolygonOutline(screenCorners);
-      const homographies = getHomographies(frame, state.corners);
-      drawAlignmentMarkers(frame, state, homographies.sourceToScreen);
-      updateHandles(screenCorners);
-      updateSidebar(frame, state);
     }
 
-    function markDirty(frame, state, modeLabel = currentMode) {
-      state.dirty = true;
-      state.saveState = 'unsaved';
-      state.lastAppliedMode = modeLabel;
+    function updateMapSources(frame, state) {
+      if (!mapReady) return;
+      const controlFeatures = [];
+      const residualFeatures = [];
+      state.controlPoints.forEach((pair, index) => {
+        if (pair.lonlat) {
+          controlFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: pair.lonlat },
+            properties: { label: String(index + 1), kind: 'target' },
+          });
+        }
+      });
+      if (state.preview) {
+        state.preview.transformed_control_points.forEach((point) => {
+          controlFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: point.lonlat },
+            properties: { label: point.label, kind: 'predicted' },
+          });
+        });
+        state.preview.residuals.forEach((row) => {
+          residualFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: row.coordinates },
+            properties: { label: row.label, error_m: row.error_m },
+          });
+        });
+      }
+      map.getSource('routes')?.setData(state.preview ? state.preview.transformed_routes : { type: 'FeatureCollection', features: [] });
+      map.getSource('control-points')?.setData({ type: 'FeatureCollection', features: controlFeatures });
+      map.getSource('residuals')?.setData({ type: 'FeatureCollection', features: residualFeatures });
     }
 
-    function fitMapToCorners(corners, immediate = false) {
+    function fitPreviewBounds(frame, state) {
+      if (!mapReady || !state.preview) return;
       const bounds = new mapboxgl.LngLatBounds();
-      corners.forEach((corner) => bounds.extend(corner));
-      map.fitBounds(bounds, { padding: 40, duration: immediate ? 0 : 300, maxZoom: 17 });
+      Object.values(state.preview.corners_lonlat).forEach((coord) => bounds.extend(coord));
+      map.fitBounds(bounds, { padding: 40, duration: 0, maxZoom: 17 });
     }
 
-    function resetFrameState(frame, state) {
-      state.corners = initialFrameCorners(frame);
+    function updateUi() {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      updateStepText(frame, state);
+      updateJsonPreview(frame, state);
+      updateMapSources(frame, state);
+    }
+
+    async function renderAll() {
+      const frame = frameById(currentFrameId);
+      if (!frame) return;
+      await drawPdfPane();
+      updateUi();
+    }
+
+    function previewCurrent() {
+      const frame = frameById(currentFrameId);
+      const state = getState(frame);
+      try {
+        state.preview = buildPreview(frame, state);
+        state.dirty = true;
+        state.notice = `Preview 更新 / RMSE ${state.preview.rmse_m.toFixed(2)} m`;
+        updateUi();
+        fitPreviewBounds(frame, state);
+      } catch (error) {
+        state.notice = error.message;
+        updateUi();
+      }
+    }
+
+    function resetFrame(frame) {
+      const state = getState(frame);
+      state.controlPoints = [];
+      state.preview = null;
       state.dirty = false;
-      state.saveState = frame.has_saved_georef ? 'saved' : 'unsaved';
-      state.alignmentPairs = [];
-      state.lastAppliedMode = frame.saved_corners ? 'saved_georef' : (frame.initial_transform_source || 'fallback_view');
-      state.saveNotice = frame.has_saved_georef ? '既存保存JSONを読込済み' : '初期配置に戻しました';
-      if (map) {
-        fitMapToCorners(state.corners, true);
-      }
-      renderOverlay();
+      state.notice = '';
+      renderAll();
     }
 
-    function translateCorners(baseScreenCorners, dx, dy) {
-      return baseScreenCorners.map((point) => screenToLonLat({ x: point.x + dx, y: point.y + dy }));
-    }
-
-    function rotateCorners(baseScreenCorners, center, angle) {
-      return baseScreenCorners.map((point) => {
-        const x = point.x - center.x;
-        const y = point.y - center.y;
-        const rx = (x * Math.cos(angle)) - (y * Math.sin(angle));
-        const ry = (x * Math.sin(angle)) + (y * Math.cos(angle));
-        return screenToLonLat({ x: center.x + rx, y: center.y + ry });
-      });
-    }
-
-    function scaleCorners(baseScreenCorners, center, factor) {
-      return baseScreenCorners.map((point) => {
-        const x = center.x + ((point.x - center.x) * factor);
-        const y = center.y + ((point.y - center.y) * factor);
-        return screenToLonLat({ x, y });
-      });
-    }
-
-    function currentScreenCorners(frame, state) {
-      return projectedCorners(state.corners);
-    }
-
-    function applyScreenTransform(transformer, label) {
+    function onPdfClick(event) {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
-      const screenCorners = currentScreenCorners(frame, state);
-      state.corners = transformer(screenCorners);
-      markDirty(frame, state, label);
-      renderOverlay();
+      if (expectedSide(state) !== 'pdf') return;
+      const rect = ui.pdfCanvas.getBoundingClientRect();
+      const pdfRect = pdfRectForFrame(frame, rect);
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      if (x < pdfRect.x || x > pdfRect.x + pdfRect.width || y < pdfRect.y || y > pdfRect.y + pdfRect.height) return;
+      const point = canvasPointToPdf(pdfRect, x, y).map((value, index) => Number(clamp(value, 0, index === 0 ? frame.image_width_px : frame.image_height_px).toFixed(3)));
+      state.controlPoints.push({ pdf_px: point, lonlat: null });
+      state.preview = null;
+      state.notice = `PDF point ${state.controlPoints.length} を記録しました`;
+      renderAll();
     }
 
-    function registerPdfPoint(sourcePoint) {
+    function onMapClick(event) {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
-      if (expectedPairSide(state) !== 'pdf') {
-        return;
-      }
-      state.alignmentPairs.push({
-        pdf: {
-          x: clamp(sourcePoint[0], 0, frame.image_width_px),
-          y: clamp(sourcePoint[1], 0, frame.image_height_px),
-        },
-      });
-      state.saveNotice = `PDF点 ${state.alignmentPairs.length} を選択しました。`;
-      renderOverlay();
-    }
-
-    function registerMapPoint(lonlat) {
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      if (expectedPairSide(state) !== 'map') {
-        return;
-      }
-      const pair = state.alignmentPairs[state.alignmentPairs.length - 1];
-      pair.map = [Number(lonlat[0].toFixed(7)), Number(lonlat[1].toFixed(7))];
-      const requiredPairs = MODE_META[currentMode].requiredPairs;
-      if (completePairCount(state) >= requiredPairs) {
-        try {
-          const completedPairs = state.alignmentPairs.slice(0, requiredPairs);
-          const transformer = currentMode === 'pair2'
-            ? fitSimilarityFromTwoPairs(completedPairs)
-            : fitProjectiveFromFourPairs(completedPairs);
-          state.corners = cornersFromTransform(frame, transformer);
-          markDirty(frame, state, MODE_META[currentMode].transformLabel);
-          state.saveNotice = `${MODE_META[currentMode].label}を適用しました。必要なら Fine-tune で微修正してください。`;
-          fitMapToCorners(state.corners, false);
-        } catch (error) {
-          showError(error.message);
-        }
+      if (expectedSide(state) !== 'map') return;
+      const pair = state.controlPoints[state.controlPoints.length - 1];
+      if (!pair) return;
+      pair.lonlat = [Number(event.lngLat.lng.toFixed(7)), Number(event.lngLat.lat.toFixed(7))];
+      state.preview = null;
+      state.notice = `Mapbox point ${completedPairs(state)} を記録しました`;
+      if (completedPairs(state) >= requiredPoints()) {
+        previewCurrent();
       } else {
-        state.saveNotice = `Mapbox点 ${completePairCount(state)} を選択しました。`;
+        renderAll();
       }
-      renderOverlay();
     }
 
-    function undoLastPoint() {
+    function onUndo() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
-      if (!state.alignmentPairs.length) {
-        return;
-      }
-      const last = state.alignmentPairs[state.alignmentPairs.length - 1];
-      if (last.map) {
-        delete last.map;
-        state.saveNotice = '最後の Mapbox 点を取り消しました。';
+      if (!state.controlPoints.length) return;
+      const last = state.controlPoints[state.controlPoints.length - 1];
+      if (last.lonlat) {
+        last.lonlat = null;
       } else {
-        state.alignmentPairs.pop();
-        state.saveNotice = '最後の PDF 点を取り消しました。';
+        state.controlPoints.pop();
       }
-      renderOverlay();
+      state.preview = null;
+      state.notice = '最後の対応点を取り消しました';
+      renderAll();
     }
 
-    function clearPoints() {
+    function onClear() {
       const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      state.alignmentPairs = [];
-      state.saveNotice = '対応点をクリアしました。';
-      renderOverlay();
+      resetFrame(frame);
     }
 
     function onSave() {
       const frame = frameById(currentFrameId);
       const state = getState(frame);
-      const payload = buildSavePayload(frame, state.corners);
-      downloadJson(frame.suggested_download_filename, payload);
-      state.dirty = false;
-      state.saveState = 'saved';
-      state.saveNotice = `保存用JSONをダウンロードしました。\n配置先: data/manual_image_georef/\nファイル名: ${frame.suggested_download_filename}`;
-      renderOverlay();
-    }
-
-    async function onCopyJson() {
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      const payload = JSON.stringify(buildSavePayload(frame, state.corners), null, 2);
-      if (!navigator.clipboard) {
-        showError('Clipboard API が利用できません。');
-        return;
-      }
       try {
-        await navigator.clipboard.writeText(payload);
-        state.saveNotice = 'JSON をクリップボードへコピーしました。';
-        renderOverlay();
-      } catch (error) {
-        showError(`コピーに失敗しました: ${error.message}`);
-      }
-    }
-
-    function onFrameChange() {
-      currentFrameId = ui.frameSelect.value;
-      const frame = frameById(currentFrameId);
-      if (frame) {
-        const state = getState(frame);
-        if (map) {
-          fitMapToCorners(state.corners, true);
+        if (!state.preview) {
+          state.preview = buildPreview(frame, state);
         }
-        renderOverlay();
-      } else {
-        showError(`frame select の値が不正です: ${currentFrameId || '(empty)'}`);
+        downloadJson(frame.suggested_download_filename, buildSavePayload(frame, state));
+        state.dirty = false;
+        state.notice = `保存用JSONをダウンロードしました\n配置先: data/manual_image_georef/\n${frame.suggested_download_filename}`;
+        updateUi();
+      } catch (error) {
+        state.notice = error.message;
+        updateUi();
       }
     }
 
@@ -1663,201 +1274,23 @@ S: Save
       const frames = sortedFrames();
       const index = frames.findIndex((frame) => frame.frame_id === currentFrameId);
       const next = frames[(index + 1) % frames.length];
-      if (!next) {
-        return;
-      }
       currentFrameId = next.frame_id;
-      ui.frameSelect.value = next.frame_id;
-      onFrameChange();
+      ui.frameSelect.value = currentFrameId;
+      renderAll();
     }
 
-    function setMode(mode) {
-      currentMode = mode;
-      renderOverlay();
-    }
-
-    function onMapWrapClick(event) {
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      if (!MODE_META[currentMode].requiredPairs || expectedPairSide(state) !== 'pdf') {
-        return;
-      }
-      const pos = pointerPosition(event);
-      const screenCorners = currentScreenCorners(frame, state);
-      if (!pointInPolygon(pos, screenCorners)) {
-        return;
-      }
-      const homographies = getHomographies(frame, state.corners);
-      const sourcePoint = applyProjectivePoint(homographies.screenToSource, [pos.x, pos.y]);
-      if (!sourcePoint) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      registerPdfPoint(sourcePoint);
-    }
-
-    function onMapClick(event) {
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      if (!MODE_META[currentMode].requiredPairs || expectedPairSide(state) !== 'map') {
-        return;
-      }
-      registerMapPoint([event.lngLat.lng, event.lngLat.lat]);
-    }
-
-    function beginMoveDrag(event) {
-      if (currentMode !== 'move') {
-        return;
-      }
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      event.preventDefault();
-      event.stopPropagation();
-      pointerState = {
-        kind: 'move',
-        start: pointerPosition(event),
-        baseScreenCorners: currentScreenCorners(frame, state),
-      };
-      map.dragPan.disable();
-    }
-
-    function beginFineDrag(event, cornerIndex) {
-      if (currentMode !== 'fine') {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      pointerState = { kind: 'fine', cornerIndex };
-      map.dragPan.disable();
-    }
-
-    function onPointerMove(event) {
-      if (!pointerState) {
-        return;
-      }
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      const pos = pointerPosition(event);
-      if (pointerState.kind === 'move') {
-        state.corners = translateCorners(pointerState.baseScreenCorners, pos.x - pointerState.start.x, pos.y - pointerState.start.y);
-        markDirty(frame, state, 'move');
-      } else if (pointerState.kind === 'fine') {
-        state.corners[pointerState.cornerIndex] = screenToLonLat(pos);
-        markDirty(frame, state, 'fine');
-      }
-      renderOverlay();
-    }
-
-    function onPointerUp() {
-      if (!pointerState) {
-        return;
-      }
-      pointerState = null;
-      map.dragPan.enable();
-    }
-
-    function onKeyDown(event) {
-      if (event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-      const tagName = (event.target && event.target.tagName || '').toLowerCase();
-      if (['input', 'select', 'textarea'].includes(tagName)) {
-        return;
-      }
-      const moveStep = event.shiftKey ? 22 : 6;
-      const rotateStep = (event.shiftKey ? 4 : 1) * Math.PI / 180;
-      const scaleFactor = event.shiftKey ? 1.08 : 1.025;
-      const key = event.key;
-      const frame = frameById(currentFrameId);
-      const state = getState(frame);
-      const screenCorners = currentScreenCorners(frame, state);
-      const center = screenCorners.reduce((acc, point) => ({ x: acc.x + point.x / 4, y: acc.y + point.y / 4 }), { x: 0, y: 0 });
-
-      if (key === 'ArrowLeft') {
-        event.preventDefault();
-        applyScreenTransform((corners) => translateCorners(corners, -moveStep, 0), 'move');
-      } else if (key === 'ArrowRight') {
-        event.preventDefault();
-        applyScreenTransform((corners) => translateCorners(corners, moveStep, 0), 'move');
-      } else if (key === 'ArrowUp') {
-        event.preventDefault();
-        applyScreenTransform((corners) => translateCorners(corners, 0, -moveStep), 'move');
-      } else if (key === 'ArrowDown') {
-        event.preventDefault();
-        applyScreenTransform((corners) => translateCorners(corners, 0, moveStep), 'move');
-      } else if (key === 'q' || key === 'Q') {
-        event.preventDefault();
-        applyScreenTransform((corners) => rotateCorners(corners, center, -rotateStep), 'rotate');
-      } else if (key === 'e' || key === 'E') {
-        event.preventDefault();
-        applyScreenTransform((corners) => rotateCorners(corners, center, rotateStep), 'rotate');
-      } else if (key === '-' || key === '_') {
-        event.preventDefault();
-        applyScreenTransform((corners) => scaleCorners(corners, center, 1 / scaleFactor), 'scale');
-      } else if (key === '+' || key === '=' ) {
-        event.preventDefault();
-        applyScreenTransform((corners) => scaleCorners(corners, center, scaleFactor), 'scale');
-      } else if (key === 'r' || key === 'R') {
-        event.preventDefault();
-        resetFrameState(frame, state);
-      } else if (key === 's' || key === 'S') {
-        event.preventDefault();
-        onSave();
-      } else if (key === '1') {
-        event.preventDefault();
-        ui.displayMode.value = 'map';
-        renderOverlay();
-      } else if (key === '2') {
-        event.preventDefault();
-        ui.displayMode.value = 'redlines';
-        renderOverlay();
-      } else if (key === '3') {
-        event.preventDefault();
-        ui.displayMode.value = 'both';
-        renderOverlay();
-      }
-    }
-
-    function wireUi() {
-      ui.frameOrder.addEventListener('change', () => {
-        const current = currentFrameId;
-        repopulateFrameSelect();
-        currentFrameId = current;
-        ui.frameSelect.value = currentFrameId;
-      });
-      ui.frameSelect.addEventListener('change', onFrameChange);
-      ui.displayMode.addEventListener('change', renderOverlay);
-      ui.opacityRange.addEventListener('input', renderOverlay);
-      ui.saveButton.addEventListener('click', onSave);
-      ui.copyJsonButton.addEventListener('click', onCopyJson);
-      ui.resetButton.addEventListener('click', () => {
-        const frame = frameById(currentFrameId);
-        resetFrameState(frame, getState(frame));
-      });
-      ui.nextButton.addEventListener('click', onNextFrame);
-      ui.undoPointButton.addEventListener('click', undoLastPoint);
-      ui.clearPointsButton.addEventListener('click', clearPoints);
-      ui.modeButtons.forEach((button) => {
-        button.addEventListener('click', () => setMode(button.dataset.mode));
-      });
-      ui.mapWrap.addEventListener('click', onMapWrapClick, true);
-      ui.centerHandle.addEventListener('pointerdown', beginMoveDrag);
-      ui.cornerHandles.forEach((handle, index) => {
-        handle.addEventListener('pointerdown', (event) => beginFineDrag(event, index));
-      });
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-      window.addEventListener('keydown', onKeyDown);
+    function onFrameChange() {
+      currentFrameId = ui.frameSelect.value;
+      renderAll();
     }
 
     function initMap() {
       if (!config.mapbox_access_token) {
-        showError('MAPBOX_ACCESS_TOKEN がありません。.env を確認して build を再実行してください。');
+        showRightError('MAPBOX_ACCESS_TOKEN がありません。.env を確認してください。');
         return;
       }
       if (typeof mapboxgl === 'undefined') {
-        showError('Mapbox GL JS の読み込みに失敗しました。右ペインでは地図を表示できません。');
+        showRightError('Mapbox GL JS の読み込みに失敗しました。');
         return;
       }
       mapboxgl.accessToken = config.mapbox_access_token;
@@ -1868,33 +1301,91 @@ S: Save
         zoom: config.initial_map_zoom || 8.5,
       });
       map.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      map.on('error', (event) => {
-        const message = event && event.error && event.error.message ? event.error.message : 'unknown map error';
-        showError(`Mapbox エラー: ${message}`);
-      });
       map.on('load', () => {
-        clearError();
-        const initial = frameById(currentFrameId) || config.frames[0];
-        if (initial) {
-          const state = getState(initial);
-          fitMapToCorners(state.corners, true);
-          renderOverlay();
-        }
+        mapReady = true;
+        clearRightError();
+        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addSource('control-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addSource('residuals', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+        map.addLayer({
+          id: 'routes-line',
+          type: 'line',
+          source: 'routes',
+          paint: { 'line-color': '#dc2626', 'line-width': 3 },
+        });
+        map.addLayer({
+          id: 'residuals-line',
+          type: 'line',
+          source: 'residuals',
+          paint: { 'line-color': '#0f172a', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': 0.65 },
+        });
+        map.addLayer({
+          id: 'control-target-circle',
+          type: 'circle',
+          source: 'control-points',
+          filter: ['==', ['get', 'kind'], 'target'],
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#f59e0b',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
+        map.addLayer({
+          id: 'control-predicted-circle',
+          type: 'circle',
+          source: 'control-points',
+          filter: ['==', ['get', 'kind'], 'predicted'],
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#2563eb',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
+        map.addLayer({
+          id: 'control-labels',
+          type: 'symbol',
+          source: 'control-points',
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-size': 12,
+            'text-offset': [0, 0],
+            'text-anchor': 'center',
+          },
+          paint: {
+            'text-color': '#ffffff',
+          },
+        });
+        map.on('click', onMapClick);
+        map.on('error', (event) => {
+          const message = event && event.error && event.error.message ? event.error.message : 'Mapbox error';
+          showRightError(message);
+        });
+        renderAll();
       });
-      map.on('click', onMapClick);
-      map.on('move', renderOverlay);
-      map.on('resize', renderOverlay);
     }
 
-    wireUi();
+    function wireUi() {
+      ui.frameSelect.addEventListener('change', onFrameChange);
+      ui.modeSelect.addEventListener('change', () => {
+        const frame = frameById(currentFrameId);
+        resetFrame(frame);
+      });
+      ui.undoButton.addEventListener('click', onUndo);
+      ui.clearButton.addEventListener('click', onClear);
+      ui.previewButton.addEventListener('click', previewCurrent);
+      ui.saveButton.addEventListener('click', onSave);
+      ui.nextButton.addEventListener('click', onNextFrame);
+      ui.pdfCanvas.addEventListener('click', onPdfClick);
+      window.addEventListener('resize', renderAll);
+    }
+
     if (validateConfig()) {
-      repopulateFrameSelect();
-      const initial = frameById(currentFrameId) || config.frames[0];
-      if (initial) {
-        renderStaticPreview(initial, getState(initial));
-      } else {
-        showError(`default frame を解決できません: ${config.default_frame_id || '(empty)'}`);
-      }
+      populateFrameSelect();
+      wireUi();
+      renderAll();
       initMap();
     }
   </script>
@@ -2014,6 +1505,7 @@ def main() -> None:
                     "image_path": f"images/{frame_id}_map.png",
                     "redlines_path": f"images/{frame_id}_redlines.png",
                     "vector_geojson_path": f"vectors/{frame_id}_routes.geojson",
+                    "route_geojson": {"type": "FeatureCollection", "features": features},
                     "pdf_bbox": rounded_bbox(frame_row),
                     "image_width_px": map_image.width,
                     "image_height_px": map_image.height,
