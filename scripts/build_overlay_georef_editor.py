@@ -844,6 +844,20 @@ S: Save
       return config.frames.find((frame) => frame.frame_id === frameId) || null;
     }
 
+    function validateConfig() {
+      if (!config || !Array.isArray(config.frames)) {
+        showError('manifest 読み込みエラー: frames 配列がありません。');
+        return false;
+      }
+      if (config.frames.length === 0) {
+        showError('frame_manifest.json の frames が空です。build_overlay_georef_editor.py を再実行してください。');
+        ui.statusText.textContent = 'frame count = 0';
+        ui.stepText.textContent = 'frames が空のため表示できません。';
+        return false;
+      }
+      return true;
+    }
+
     function sortedFrames() {
       const frames = [...config.frames];
       if (ui.frameOrder.value === 'page') {
@@ -867,8 +881,14 @@ S: Save
         option.textContent = `${frame.page_no} / ${frame.frame_id} / score=${Number(frame.priority_score || 0).toFixed(1)}`;
         ui.frameSelect.appendChild(option);
       }
-      ui.frameSelect.value = selected;
-      currentFrameId = ui.frameSelect.value || selected;
+      const preferred = (
+        (selected && frames.some((frame) => frame.frame_id === selected) && selected)
+        || (config.default_frame_id && frames.some((frame) => frame.frame_id === config.default_frame_id) && config.default_frame_id)
+        || (frames[0] && frames[0].frame_id)
+        || ''
+      );
+      ui.frameSelect.value = preferred;
+      currentFrameId = preferred;
     }
 
     function cornersFromSaved(savedCorners) {
@@ -1095,6 +1115,62 @@ S: Save
       });
       imageCache.set(url, promise);
       return promise;
+    }
+
+    function drawFramedImage(image, opacity = 1) {
+      const rect = ui.canvas.getBoundingClientRect();
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      const scale = Math.min(rect.width / width, rect.height / height);
+      const drawWidth = width * scale;
+      const drawHeight = height * scale;
+      const x = (rect.width - drawWidth) / 2;
+      const y = (rect.height - drawHeight) / 2;
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.drawImage(image, x, y, drawWidth, drawHeight);
+      ctx.restore();
+      ctx.save();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(185,28,28,0.9)';
+      ctx.setLineDash([10, 6]);
+      ctx.strokeRect(x, y, drawWidth, drawHeight);
+      ctx.restore();
+    }
+
+    async function renderStaticPreview(frame, state) {
+      resizeCanvas();
+      ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
+      const rect = ui.canvas.getBoundingClientRect();
+      ctx.save();
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.restore();
+
+      try {
+        if (!frame.image_path) {
+          throw new Error(`image_path が空です: ${frame.frame_id}`);
+        }
+        const displayMode = ui.displayMode.value;
+        if (displayMode === 'map' || displayMode === 'both') {
+          const image = await loadImage(frame.image_path);
+          drawFramedImage(image, Number(ui.opacityRange.value || 0.72));
+        }
+        if (displayMode === 'redlines' || displayMode === 'both') {
+          if (!frame.redlines_path) {
+            throw new Error(`redlines_path が空です: ${frame.frame_id}`);
+          }
+          const image = await loadImage(frame.redlines_path);
+          drawFramedImage(image, displayMode === 'both' ? 0.95 : Number(ui.opacityRange.value || 0.72));
+        }
+      } catch (error) {
+        showError(error.message);
+      }
+      updateSidebar(frame, state);
+      ui.mapMessage.textContent = [
+        `page ${frame.page_no} / ${frame.frame_id}`,
+        'Mapbox が未初期化のため、静的プレビューのみ表示しています。',
+      ].join('\\n');
     }
 
     function pointerPosition(event) {
@@ -1367,10 +1443,18 @@ S: Save
 
     async function renderOverlay() {
       if (!map) {
+        const frame = frameById(currentFrameId);
+        if (!frame) {
+          showError(`対象 frame が見つかりません: ${currentFrameId || '(empty)'}`);
+          return;
+        }
+        const state = getState(frame);
+        await renderStaticPreview(frame, state);
         return;
       }
       const frame = frameById(currentFrameId);
       if (!frame) {
+        showError(`対象 frame が見つかりません: ${currentFrameId || '(empty)'}`);
         return;
       }
       const state = getState(frame);
@@ -1381,10 +1465,16 @@ S: Save
       const displayMode = ui.displayMode.value;
       try {
         if (displayMode === 'map' || displayMode === 'both') {
+          if (!frame.image_path) {
+            throw new Error(`image_path が空です: ${frame.frame_id}`);
+          }
           const image = await loadImage(frame.image_path);
           drawWarpedImage(image, screenCorners, opacity);
         }
         if (displayMode === 'redlines' || displayMode === 'both') {
+          if (!frame.redlines_path) {
+            throw new Error(`redlines_path が空です: ${frame.frame_id}`);
+          }
           const image = await loadImage(frame.redlines_path);
           drawWarpedImage(image, screenCorners, displayMode === 'both' ? Math.min(1, opacity + 0.18) : opacity);
         }
@@ -1417,7 +1507,9 @@ S: Save
       state.alignmentPairs = [];
       state.lastAppliedMode = frame.saved_corners ? 'saved_georef' : (frame.initial_transform_source || 'fallback_view');
       state.saveNotice = frame.has_saved_georef ? '既存保存JSONを読込済み' : '初期配置に戻しました';
-      fitMapToCorners(state.corners, true);
+      if (map) {
+        fitMapToCorners(state.corners, true);
+      }
       renderOverlay();
     }
 
@@ -1558,8 +1650,12 @@ S: Save
       const frame = frameById(currentFrameId);
       if (frame) {
         const state = getState(frame);
-        fitMapToCorners(state.corners, true);
+        if (map) {
+          fitMapToCorners(state.corners, true);
+        }
         renderOverlay();
+      } else {
+        showError(`frame select の値が不正です: ${currentFrameId || '(empty)'}`);
       }
     }
 
@@ -1757,7 +1853,11 @@ S: Save
 
     function initMap() {
       if (!config.mapbox_access_token) {
-        showError('MAPBOX_ACCESS_TOKEN が見つかりません。.env に設定してから build を再実行してください。');
+        showError('MAPBOX_ACCESS_TOKEN がありません。.env を確認して build を再実行してください。');
+        return;
+      }
+      if (typeof mapboxgl === 'undefined') {
+        showError('Mapbox GL JS の読み込みに失敗しました。右ペインでは地図を表示できません。');
         return;
       }
       mapboxgl.accessToken = config.mapbox_access_token;
@@ -1768,9 +1868,12 @@ S: Save
         zoom: config.initial_map_zoom || 8.5,
       });
       map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+      map.on('error', (event) => {
+        const message = event && event.error && event.error.message ? event.error.message : 'unknown map error';
+        showError(`Mapbox エラー: ${message}`);
+      });
       map.on('load', () => {
         clearError();
-        repopulateFrameSelect();
         const initial = frameById(currentFrameId) || config.frames[0];
         if (initial) {
           const state = getState(initial);
@@ -1784,7 +1887,16 @@ S: Save
     }
 
     wireUi();
-    initMap();
+    if (validateConfig()) {
+      repopulateFrameSelect();
+      const initial = frameById(currentFrameId) || config.frames[0];
+      if (initial) {
+        renderStaticPreview(initial, getState(initial));
+      } else {
+        showError(`default frame を解決できません: ${config.default_frame_id || '(empty)'}`);
+      }
+      initMap();
+    }
   </script>
 </body>
 </html>
@@ -1937,7 +2049,14 @@ def main() -> None:
     )
     (args.out_dir / "index.html").write_text(build_html(manifest), encoding="utf-8")
 
+    image_count = len(list(image_dir.glob("*_map.png"))) + len(list(image_dir.glob("*_redlines.png")))
+    vector_count = len(list(vector_dir.glob("*_routes.geojson")))
     print(f"Wrote {len(manifest_frames)} frames to {args.out_dir}")
+    print("Sanity check:")
+    print(f"  frame_count={len(manifest_frames)}")
+    print(f"  image_count={image_count}")
+    print(f"  route_geojson_count={vector_count}")
+    print(f"  default_frame={manifest['default_frame_id'] or '(empty)'}")
 
 
 if __name__ == "__main__":
