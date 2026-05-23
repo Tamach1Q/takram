@@ -18,6 +18,7 @@ DEFAULT_CENTER = [133.5, 33.8]
 DEFAULT_ZOOM = 8.5
 RENDER_SCALE = 2.0
 EDITOR_VERSION = "manual-route-editor-v1"
+GLOBAL_PANEL_ID = "global_manual"
 
 
 def ensure_dir(path: Path) -> None:
@@ -537,6 +538,10 @@ def build_html(config: dict[str, Any]) -> str:
     <div id="toolbar">
       <div class="toolbarLabel">Panel</div>
       <select id="panelSelect"></select>
+      <select id="modeSelect">
+        <option value="panel">Panel Mode</option>
+        <option value="global">Global Trace Mode</option>
+      </select>
       <div id="panelCount"></div>
       <button id="prevButton">Previous Panel</button>
       <button id="nextButton">Next Panel</button>
@@ -617,6 +622,7 @@ def build_html(config: dict[str, Any]) -> str:
     const config = window.__MANUAL_ROUTE_EDITOR_CONFIG__;
     const ui = {
       panelSelect: document.getElementById('panelSelect'),
+      modeSelect: document.getElementById('modeSelect'),
       panelCount: document.getElementById('panelCount'),
       prevButton: document.getElementById('prevButton'),
       nextButton: document.getElementById('nextButton'),
@@ -645,9 +651,11 @@ def build_html(config: dict[str, Any]) -> str:
       routeList: document.getElementById('routeList'),
     };
     const pdfCtx = ui.pdfCanvas.getContext('2d');
+    const GLOBAL_SCOPE_ID = '__GLOBAL_SCOPE__';
     const imageCache = new Map();
     const panelViewState = new Map();
     let currentPanelId = '';
+    let traceMode = 'panel';
     let map = null;
     let mapReady = false;
     let vertexMarkers = [];
@@ -672,6 +680,27 @@ def build_html(config: dict[str, Any]) -> str:
 
     function panelById(panelId) {
       return config.panels.find((panel) => panel.georef_panel_id === panelId) || null;
+    }
+
+    function globalPanelMeta() {
+      return {
+        page_no: null,
+        georef_panel_id: GLOBAL_PANEL_ID,
+        panel_type: 'global',
+      };
+    }
+
+    function routeScopeIdForMode(mode = traceMode) {
+      return mode === 'global' ? GLOBAL_SCOPE_ID : currentPanelId;
+    }
+
+    function currentRouteScopeId() {
+      return routeScopeIdForMode(traceMode);
+    }
+
+    function routePanelMetaForScope(scopeId) {
+      if (scopeId === GLOBAL_SCOPE_ID) return globalPanelMeta();
+      return panelById(scopeId);
     }
 
     function sortedPanels() {
@@ -708,8 +737,12 @@ def build_html(config: dict[str, Any]) -> str:
       return ensurePanelState(panelId).routes;
     }
 
-    function panelNotes(panelId) {
-      return ensurePanelState(panelId).notes || '';
+    function routeScopeRoutes(scopeId = currentRouteScopeId()) {
+      return ensurePanelState(scopeId).routes;
+    }
+
+    function panelNotes(scopeId = currentRouteScopeId()) {
+      return ensurePanelState(scopeId).notes || '';
     }
 
     function manualGeoPoints(panel) {
@@ -724,12 +757,12 @@ def build_html(config: dict[str, Any]) -> str:
       return panel?.temple_points || [];
     }
 
-    function activeRouteId(panelId = currentPanelId) {
-      return state.activeRouteIdByPanel[panelId] || null;
+    function activeRouteId(scopeId = currentRouteScopeId()) {
+      return state.activeRouteIdByPanel[scopeId] || null;
     }
 
-    function setActiveRouteId(panelId, routeId) {
-      state.activeRouteIdByPanel[panelId] = routeId || null;
+    function setActiveRouteId(scopeId, routeId) {
+      state.activeRouteIdByPanel[scopeId] = routeId || null;
     }
 
     function currentEditMode() {
@@ -762,7 +795,7 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function currentPanelStatus(panelId) {
-      const routes = panelRoutes(panelId);
+      const routes = routeScopeRoutes(panelId);
       if (!routes.length) return 'empty';
       if (routes.every((route) => route.status === 'done')) return 'done';
       if (routes.some((route) => route.status === 'reviewed')) return 'reviewed';
@@ -788,11 +821,11 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function routeVertexCount(panelId) {
-      return panelRoutes(panelId).reduce((sum, route) => sum + route.coordinates.length, 0);
+      return routeScopeRoutes(panelId).reduce((sum, route) => sum + route.coordinates.length, 0);
     }
 
     function panelLengthMeters(panelId) {
-      return panelRoutes(panelId).reduce((sum, route) => sum + routeLengthMeters(route.coordinates), 0);
+      return routeScopeRoutes(panelId).reduce((sum, route) => sum + routeLengthMeters(route.coordinates), 0);
     }
 
     function buildRouteFeature(panel, route) {
@@ -802,6 +835,7 @@ def build_html(config: dict[str, Any]) -> str:
         properties: {
           source: 'manual_mapbox_trace',
           route_id: route.route_id,
+          source_mode: panel.georef_panel_id === GLOBAL_PANEL_ID ? 'global_trace' : 'panel_trace',
           page_no: panel.page_no,
           georef_panel_id: panel.georef_panel_id,
           panel_type: panel.panel_type,
@@ -824,6 +858,11 @@ def build_html(config: dict[str, Any]) -> str:
             features.push(buildRouteFeature(panel, route));
           }
         });
+      });
+      routeScopeRoutes(GLOBAL_SCOPE_ID).forEach((route) => {
+        if (route.coordinates.length >= 2) {
+          features.push(buildRouteFeature(globalPanelMeta(), route));
+        }
       });
       return { type: 'FeatureCollection', features };
     }
@@ -850,41 +889,41 @@ def build_html(config: dict[str, Any]) -> str:
       };
     }
 
-    function startNewRoute(panelId, seedCoord = null) {
-      const panel = panelById(panelId);
-      const panelState = ensurePanelState(panelId);
+    function startNewRoute(scopeId, seedCoord = null) {
+      const panel = routePanelMetaForScope(scopeId);
+      const panelState = ensurePanelState(scopeId);
       const route = emptyRoute(panel);
       if (seedCoord) route.coordinates.push(seedCoord);
-      pushHistory(panelId);
+      pushHistory(scopeId);
       panelState.routes.push(route);
-      setActiveRouteId(panelId, route.route_id);
-      touchPanel(panelId);
+      setActiveRouteId(scopeId, route.route_id);
+      touchPanel(scopeId);
       return route;
     }
 
-    function activeRoute(panelId = currentPanelId) {
-      const routeId = activeRouteId(panelId);
+    function activeRoute(scopeId = currentRouteScopeId()) {
+      const routeId = activeRouteId(scopeId);
       if (!routeId) return null;
-      return panelRoutes(panelId).find((route) => route.route_id === routeId) || null;
+      return routeScopeRoutes(scopeId).find((route) => route.route_id === routeId) || null;
     }
 
-    function removeRoute(panelId, routeId) {
-      pushHistory(panelId);
-      const panelState = ensurePanelState(panelId);
+    function removeRoute(scopeId, routeId) {
+      pushHistory(scopeId);
+      const panelState = ensurePanelState(scopeId);
       panelState.routes = panelState.routes.filter((route) => route.route_id !== routeId);
-      if (activeRouteId(panelId) === routeId) {
-        setActiveRouteId(panelId, panelState.routes.at(-1)?.route_id || null);
+      if (activeRouteId(scopeId) === routeId) {
+        setActiveRouteId(scopeId, panelState.routes.at(-1)?.route_id || null);
       }
-      touchPanel(panelId);
+      touchPanel(scopeId);
       renderAll();
     }
 
-    function finalizeActiveRoute(panelId = currentPanelId) {
-      const route = activeRoute(panelId);
+    function finalizeActiveRoute(scopeId = currentRouteScopeId()) {
+      const route = activeRoute(scopeId);
       if (!route || route.coordinates.length < 2) return;
       route.updated_at = new Date().toISOString();
-      setActiveRouteId(panelId, null);
-      touchPanel(panelId);
+      setActiveRouteId(scopeId, null);
+      touchPanel(scopeId);
       renderAll();
     }
 
@@ -1006,6 +1045,21 @@ def build_html(config: dict[str, Any]) -> str:
       pdfCtx.clearRect(0, 0, rect.width, rect.height);
       pdfCtx.fillStyle = '#ebe7df';
       pdfCtx.fillRect(0, 0, rect.width, rect.height);
+      if (traceMode === 'global') {
+        pdfCtx.fillStyle = '#475569';
+        pdfCtx.font = '600 16px ui-sans-serif, system-ui, sans-serif';
+        pdfCtx.textAlign = 'center';
+        pdfCtx.textBaseline = 'middle';
+        pdfCtx.fillText('Global Trace Mode', rect.width / 2, Math.max(80, rect.height / 2 - 18));
+        pdfCtx.font = '13px ui-sans-serif, system-ui, sans-serif';
+        pdfCtx.fillText('元PDFは別タブで参照してください。panel選択は参考用です。', rect.width / 2, Math.max(108, rect.height / 2 + 12));
+        ui.pdfDebug.textContent = [
+          'trace_mode: global',
+          `selected_reference_panel: ${panel?.georef_panel_id || '-'}`,
+          'pdf_reference: detached',
+        ].join('\\n');
+        return;
+      }
       const layout = currentPdfLayout(panel, rect, view);
       const mode = ui.pdfDisplaySelect.value;
       const showMap = mode === 'map' || mode === 'mapAccepted';
@@ -1071,11 +1125,15 @@ def build_html(config: dict[str, Any]) -> str:
 
     function updateStepText() {
       const panel = panelById(currentPanelId);
-      const summary = computePanelSummary(currentPanelId);
+      const scopeId = currentRouteScopeId();
+      const summary = computePanelSummary(scopeId);
       const route = activeRoute();
       const currentLength = route ? routeLengthMeters(route.coordinates) / 1000 : 0;
-      ui.stepText.textContent = `Mapbox上をクリックして ${panel.georef_panel_id} の徒歩ルートを描きます`;
+      ui.stepText.textContent = traceMode === 'global'
+        ? 'Global Trace Mode: panelに依存せず Mapbox 上へ直接ルートを描きます'
+        : `Mapbox上をクリックして ${panel.georef_panel_id} の徒歩ルートを描きます`;
       ui.metrics.innerHTML = `
+        <span class="metricBadge">mode: ${traceMode === 'global' ? 'global' : 'panel'}</span>
         <span class="metricBadge">status: ${summary.status}</span>
         <span><strong>vertex</strong>: ${summary.vertexCount}</span>
         <span><strong>panel km</strong>: ${summary.lengthKm.toFixed(2)}</span>
@@ -1087,21 +1145,27 @@ def build_html(config: dict[str, Any]) -> str:
         : 'autosave: localStorage / Save時は dir未バインドならダウンロード';
     }
 
-    function buildAllManualRoutesSourceData() {
+    function buildAllManualRoutesSourceData(excludeScopeId = currentRouteScopeId()) {
       const features = [];
       sortedPanels().forEach((panel) => {
+        if (panel.georef_panel_id === excludeScopeId) return;
         panelRoutes(panel.georef_panel_id)
           .filter((route) => route.coordinates.length >= 2)
           .forEach((route) => features.push(buildRouteFeature(panel, route)));
       });
+      if (excludeScopeId !== GLOBAL_SCOPE_ID) {
+        routeScopeRoutes(GLOBAL_SCOPE_ID)
+          .filter((route) => route.coordinates.length >= 2)
+          .forEach((route) => features.push(buildRouteFeature(globalPanelMeta(), route)));
+      }
       return { type: 'FeatureCollection', features };
     }
 
-    function buildCurrentPanelRoutesSourceData(panelId = currentPanelId) {
-      const panel = panelById(panelId);
+    function buildCurrentPanelRoutesSourceData(scopeId = currentRouteScopeId()) {
+      const panel = routePanelMetaForScope(scopeId);
       return {
         type: 'FeatureCollection',
-        features: panelRoutes(panelId)
+        features: routeScopeRoutes(scopeId)
           .filter((route) => route.coordinates.length >= 2)
           .map((route) => buildRouteFeature(panel, route)),
       };
@@ -1246,9 +1310,10 @@ def build_html(config: dict[str, Any]) -> str:
     function updateMapSources() {
       if (!mapReady) return;
       const panel = panelById(currentPanelId);
-      ensureMapSource('all-saved-routes', buildAllManualRoutesSourceData());
-      ensureMapSource('current-panel-routes', buildCurrentPanelRoutesSourceData(currentPanelId));
-      ensureMapSource('active-route', lineFeatureForActiveRoute(activeRoute()));
+      const scopeId = currentRouteScopeId();
+      ensureMapSource('all-saved-routes', buildAllManualRoutesSourceData(scopeId));
+      ensureMapSource('current-panel-routes', buildCurrentPanelRoutesSourceData(scopeId));
+      ensureMapSource('active-route', lineFeatureForActiveRoute(activeRoute(scopeId)));
       ensureMapSource('reference-routes', buildReferenceGeojsonForMap(panel));
       ensureMapSource('temple-points', buildTempleGeojsonForMap(panel));
       setLayerVisibility(['all-saved-routes-line'], allRoutesVisible);
@@ -1281,25 +1346,25 @@ def build_html(config: dict[str, Any]) -> str:
         marker.getElement().addEventListener('click', (event) => {
           event.stopPropagation();
           if (currentEditMode() === 'delete') {
-            pushHistory(currentPanelId);
+            pushHistory(currentRouteScopeId());
             route.coordinates.splice(index, 1);
             route.updated_at = new Date().toISOString();
             if (route.coordinates.length < 2) {
-              removeRoute(currentPanelId, route.route_id);
+              removeRoute(currentRouteScopeId(), route.route_id);
               return;
             }
-            touchPanel(currentPanelId);
+            touchPanel(currentRouteScopeId());
             renderAll();
           } else {
             refreshVertexMarkers();
           }
         });
         marker.on('dragend', () => {
-          pushHistory(currentPanelId);
+          pushHistory(currentRouteScopeId());
           const lngLat = marker.getLngLat();
           route.coordinates[index] = [Number(lngLat.lng.toFixed(7)), Number(lngLat.lat.toFixed(7))];
           route.updated_at = new Date().toISOString();
-          touchPanel(currentPanelId);
+          touchPanel(currentRouteScopeId());
           renderAll();
         });
         vertexMarkers.push(marker);
@@ -1335,7 +1400,7 @@ def build_html(config: dict[str, Any]) -> str:
     function fitMapToPanel(panel) {
       if (!mapReady) return;
       if (!panel) return;
-      const routeFeatures = buildCurrentPanelRoutesSourceData(panel.georef_panel_id).features;
+      const routeFeatures = buildCurrentPanelRoutesSourceData(currentRouteScopeId()).features;
       if (routeFeatures.length) {
         const bounds = new mapboxgl.LngLatBounds();
         routeFeatures.forEach((feature) => feature.geometry.coordinates.forEach((coord) => bounds.extend(coord)));
@@ -1386,16 +1451,16 @@ def build_html(config: dict[str, Any]) -> str:
       const coord = [Number(event.lngLat.lng.toFixed(7)), Number(event.lngLat.lat.toFixed(7))];
       let route = activeRoute();
       if (event.originalEvent.shiftKey || !route) {
-        route = startNewRoute(currentPanelId, coord);
+        route = startNewRoute(currentRouteScopeId(), coord);
         renderAll();
         return;
       }
-      pushHistory(currentPanelId);
+      pushHistory(currentRouteScopeId());
       const insertIndex = nearestSegmentInsertIndex(route, event.lngLat);
       if (insertIndex !== null) route.coordinates.splice(insertIndex, 0, coord);
       else route.coordinates.push(coord);
       route.updated_at = new Date().toISOString();
-      touchPanel(currentPanelId);
+      touchPanel(currentRouteScopeId());
       renderAll();
     }
 
@@ -1407,7 +1472,7 @@ def build_html(config: dict[str, Any]) -> str:
     function onMapRouteClick(event) {
       const feature = event.features?.[0];
       if (!feature) return;
-      setActiveRouteId(currentPanelId, feature.properties.route_id);
+      setActiveRouteId(currentRouteScopeId(), feature.properties.route_id);
       renderAll();
     }
 
@@ -1418,10 +1483,13 @@ def build_html(config: dict[str, Any]) -> str:
       const coordinates = feature.geometry?.coordinates || [];
       const anchor = coordinates[Math.floor(coordinates.length / 2)] || coordinates[0];
       if (!anchor) return;
+      const scopeLabel = props.georef_panel_id === GLOBAL_PANEL_ID
+        ? 'global_manual'
+        : `p${props.page_no} / ${props.georef_panel_id || '-'}`;
       new mapboxgl.Popup({ closeButton: true, offset: 10 })
         .setLngLat(anchor)
         .setHTML(
-          `<strong>p${props.page_no} / ${props.georef_panel_id || '-'}</strong><br>` +
+          `<strong>${scopeLabel}</strong><br>` +
           `length_km=${((Number(props.length_m || 0)) / 1000).toFixed(2)}<br>` +
           `vertex=${props.vertex_count || '-'} / status=${props.status || '-'}`
         )
@@ -1445,13 +1513,13 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function updateRouteList() {
-      const routes = panelRoutes(currentPanelId);
+      const routes = routeScopeRoutes(currentRouteScopeId());
       if (!routes.length) {
         ui.routeList.innerHTML = '<div class="routeMeta">まだLineStringがありません。</div>';
         return;
       }
       ui.routeList.innerHTML = routes.map((route) => {
-        const active = route.route_id === activeRouteId();
+        const active = route.route_id === activeRouteId(currentRouteScopeId());
         const km = (routeLengthMeters(route.coordinates) / 1000).toFixed(2);
         return `
           <div class="routeRow ${active ? 'active' : ''}" data-route-id="${route.route_id}">
@@ -1467,14 +1535,15 @@ def build_html(config: dict[str, Any]) -> str:
 
     function renderMapDebug() {
       const panel = panelById(currentPanelId);
-      const summary = computePanelSummary(currentPanelId);
+      const summary = computePanelSummary(currentRouteScopeId());
       const route = activeRoute();
       ui.mapDebug.textContent = [
+        `trace_mode: ${traceMode}`,
         `page_no: ${panel.page_no}`,
         `georef_panel_id: ${panel.georef_panel_id}`,
         `panel_type: ${panel.panel_type}`,
         `status: ${summary.status}`,
-        `route_count: ${panelRoutes(currentPanelId).length}`,
+        `route_count: ${routeScopeRoutes(currentRouteScopeId()).length}`,
         `vertex_count: ${summary.vertexCount}`,
         `panel_length_km: ${(summary.lengthKm).toFixed(3)}`,
         `active_route: ${route ? route.route_id : '-'}`,
@@ -1488,7 +1557,7 @@ def build_html(config: dict[str, Any]) -> str:
       populatePanelSelect();
       updateStepText();
       updateRouteList();
-      ui.panelNotes.value = panelNotes(currentPanelId);
+      ui.panelNotes.value = panelNotes(currentRouteScopeId());
       drawPdfPane();
       updateMapSources();
       refreshVertexMarkers();
@@ -1509,6 +1578,8 @@ def build_html(config: dict[str, Any]) -> str:
         const payload = JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
         await writeFileToHandle(dirHandle, `${panel.georef_panel_id}.geojson`, payload);
       }
+      const globalPayload = JSON.stringify(buildCurrentPanelRoutesSourceData(GLOBAL_SCOPE_ID), null, 2);
+      await writeFileToHandle(dirHandle, `${GLOBAL_PANEL_ID}.geojson`, globalPayload);
     }
 
     async function persistToOutputDir() {
@@ -1616,7 +1687,7 @@ def build_html(config: dict[str, Any]) -> str:
       if (routesPayload?.features?.length && !preferred?.panels) {
         routesPayload.features.forEach((feature) => {
           const props = feature.properties || {};
-          const panelId = props.georef_panel_id;
+          const panelId = props.georef_panel_id === GLOBAL_PANEL_ID ? GLOBAL_SCOPE_ID : props.georef_panel_id;
           if (!panelId) return;
           const panelState = ensurePanelState(panelId);
           panelState.routes.push({
@@ -1630,6 +1701,7 @@ def build_html(config: dict[str, Any]) -> str:
         });
       }
       sortedPanels().forEach((panel) => ensurePanelState(panel.georef_panel_id));
+      ensurePanelState(GLOBAL_SCOPE_ID);
     }
 
     function onPanelChange() {
@@ -1639,7 +1711,9 @@ def build_html(config: dict[str, Any]) -> str:
       view.fitMode = 'all';
       view.fitApplied = false;
       renderAll();
-      fitMapToPanel(panel);
+      if (traceMode === 'panel') {
+        fitMapToPanel(panel);
+      }
     }
 
     function stepPanel(offset) {
@@ -1653,29 +1727,44 @@ def build_html(config: dict[str, Any]) -> str:
       view.fitMode = 'all';
       view.fitApplied = false;
       renderAll();
-      fitMapToPanel(panel);
+      if (traceMode === 'panel') {
+        fitMapToPanel(panel);
+      }
+    }
+
+    function onModeChange() {
+      traceMode = ui.modeSelect.value;
+      if (traceMode === 'global') {
+        ui.toggleAllRoutesButton.disabled = true;
+        setAllRoutesVisible(true);
+      } else {
+        ui.toggleAllRoutesButton.disabled = false;
+        fitMapToPanel(panelById(currentPanelId));
+      }
+      renderAll();
     }
 
     function onNotesInput() {
-      ensurePanelState(currentPanelId).notes = ui.panelNotes.value;
-      touchPanel(currentPanelId);
+      const scopeId = currentRouteScopeId();
+      ensurePanelState(scopeId).notes = ui.panelNotes.value;
+      touchPanel(scopeId);
     }
 
     function onUndo() {
-      undoPanel(currentPanelId);
+      undoPanel(currentRouteScopeId());
     }
 
     function removeLastVertex() {
       const route = activeRoute();
       if (!route) return;
-      pushHistory(currentPanelId);
+      pushHistory(currentRouteScopeId());
       route.coordinates.pop();
       route.updated_at = new Date().toISOString();
       if (!route.coordinates.length) {
-        removeRoute(currentPanelId, route.route_id);
+        removeRoute(currentRouteScopeId(), route.route_id);
         return;
       }
-      touchPanel(currentPanelId);
+      touchPanel(currentRouteScopeId());
       renderAll();
     }
 
@@ -1687,6 +1776,11 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function setAllRoutesVisible(nextVisible) {
+      if (traceMode === 'global' && !nextVisible) {
+        allRoutesVisible = true;
+        ui.toggleAllRoutesButton.textContent = 'All Routes ON';
+        return;
+      }
       allRoutesVisible = nextVisible;
       ui.toggleAllRoutesButton.textContent = allRoutesVisible ? 'All Routes ON' : 'All Routes OFF';
       updateMapSources();
@@ -1818,10 +1912,11 @@ def build_html(config: dict[str, Any]) -> str:
 
     function wireUi() {
       ui.panelSelect.addEventListener('change', onPanelChange);
+      ui.modeSelect.addEventListener('change', onModeChange);
       ui.prevButton.addEventListener('click', () => stepPanel(-1));
       ui.nextButton.addEventListener('click', () => stepPanel(1));
       ui.bindDirButton.addEventListener('click', bindOutputDir);
-      ui.newRouteButton.addEventListener('click', () => { startNewRoute(currentPanelId); renderAll(); });
+      ui.newRouteButton.addEventListener('click', () => { startNewRoute(currentRouteScopeId()); renderAll(); });
       ui.undoButton.addEventListener('click', onUndo);
       ui.saveButton.addEventListener('click', onSave);
       ui.toggleAllRoutesButton.addEventListener('click', () => setAllRoutesVisible(!allRoutesVisible));
@@ -1831,12 +1926,12 @@ def build_html(config: dict[str, Any]) -> str:
       ui.routeList.addEventListener('click', (event) => {
         const deleteButton = event.target.closest('[data-delete-route-id]');
         if (deleteButton) {
-          removeRoute(currentPanelId, deleteButton.dataset.deleteRouteId);
+          removeRoute(currentRouteScopeId(), deleteButton.dataset.deleteRouteId);
           return;
         }
         const row = event.target.closest('[data-route-id]');
         if (!row) return;
-        setActiveRouteId(currentPanelId, row.dataset.routeId);
+        setActiveRouteId(currentRouteScopeId(), row.dataset.routeId);
         renderAll();
       });
       ui.pdfDisplaySelect.addEventListener('change', renderAll);
@@ -1941,7 +2036,7 @@ def build_html(config: dict[str, Any]) -> str:
           ui.editModeSelect.value = 'delete';
           refreshVertexMarkers();
         } else if (event.key === 'Escape') {
-          setActiveRouteId(currentPanelId, null);
+          setActiveRouteId(currentRouteScopeId(), null);
           renderAll();
         }
       });
@@ -1957,6 +2052,8 @@ def build_html(config: dict[str, Any]) -> str:
       await loadPersistedState();
       const panels = sortedPanels();
       currentPanelId = config.default_georef_panel_id || panels[0]?.georef_panel_id || '';
+      ui.modeSelect.value = traceMode;
+      ui.toggleAllRoutesButton.disabled = traceMode === 'global';
       populatePanelSelect();
       wireUi();
       await drawPdfPane();
@@ -2103,8 +2200,23 @@ def main() -> None:
 
     (args.out_dir / "panel_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     (args.out_dir / "index.html").write_text(build_html(manifest), encoding="utf-8")
-    (args.out_dir / "manual_routes.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": []}, ensure_ascii=False, indent=2), encoding="utf-8")
-    (args.out_dir / "autosave.json").write_text(json.dumps({"editor_version": EDITOR_VERSION, "panels": {}, "active_route_id_by_panel": {}}, ensure_ascii=False, indent=2), encoding="utf-8")
+    manual_routes_path = args.out_dir / "manual_routes.geojson"
+    autosave_path = args.out_dir / "autosave.json"
+    if not manual_routes_path.exists():
+        manual_routes_path.write_text(json.dumps({"type": "FeatureCollection", "features": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not autosave_path.exists():
+        autosave_path.write_text(
+            json.dumps(
+                {
+                    "editor_version": EDITOR_VERSION,
+                    "panels": {},
+                    "active_route_id_by_panel": {},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     (args.out_dir / "report.md").write_text(
         "\n".join(
             [
