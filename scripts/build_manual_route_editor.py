@@ -544,6 +544,7 @@ def build_html(config: dict[str, Any]) -> str:
       <button id="newRouteButton">New Route</button>
       <button id="undoButton">Undo</button>
       <button id="saveButton" class="primary">Save</button>
+      <button id="toggleAllRoutesButton">All Routes ON</button>
       <button id="toggleReferenceButton">Reference OFF</button>
       <button id="toggleTempleButton">Temple ON</button>
     </div>
@@ -623,6 +624,7 @@ def build_html(config: dict[str, Any]) -> str:
       newRouteButton: document.getElementById('newRouteButton'),
       undoButton: document.getElementById('undoButton'),
       saveButton: document.getElementById('saveButton'),
+      toggleAllRoutesButton: document.getElementById('toggleAllRoutesButton'),
       toggleReferenceButton: document.getElementById('toggleReferenceButton'),
       toggleTempleButton: document.getElementById('toggleTempleButton'),
       pdfDisplaySelect: document.getElementById('pdfDisplaySelect'),
@@ -650,6 +652,7 @@ def build_html(config: dict[str, Any]) -> str:
     let mapReady = false;
     let vertexMarkers = [];
     let outputDirHandle = null;
+    let allRoutesVisible = true;
     let referenceVisible = false;
     let templeVisible = true;
     const historyByPanel = new Map();
@@ -1084,7 +1087,17 @@ def build_html(config: dict[str, Any]) -> str:
         : 'autosave: localStorage / Save時は dir未バインドならダウンロード';
     }
 
-    function buildManualRoutesSourceData(panelId = currentPanelId) {
+    function buildAllManualRoutesSourceData() {
+      const features = [];
+      sortedPanels().forEach((panel) => {
+        panelRoutes(panel.georef_panel_id)
+          .filter((route) => route.coordinates.length >= 2)
+          .forEach((route) => features.push(buildRouteFeature(panel, route)));
+      });
+      return { type: 'FeatureCollection', features };
+    }
+
+    function buildCurrentPanelRoutesSourceData(panelId = currentPanelId) {
       const panel = panelById(panelId);
       return {
         type: 'FeatureCollection',
@@ -1233,10 +1246,12 @@ def build_html(config: dict[str, Any]) -> str:
     function updateMapSources() {
       if (!mapReady) return;
       const panel = panelById(currentPanelId);
-      ensureMapSource('manual-routes', buildManualRoutesSourceData(currentPanelId));
+      ensureMapSource('all-saved-routes', buildAllManualRoutesSourceData());
+      ensureMapSource('current-panel-routes', buildCurrentPanelRoutesSourceData(currentPanelId));
       ensureMapSource('active-route', lineFeatureForActiveRoute(activeRoute()));
       ensureMapSource('reference-routes', buildReferenceGeojsonForMap(panel));
       ensureMapSource('temple-points', buildTempleGeojsonForMap(panel));
+      setLayerVisibility(['all-saved-routes-line'], allRoutesVisible);
       setLayerVisibility(['reference-routes-line'], referenceVisible);
       setLayerVisibility(['temple-circle', 'temple-number', 'temple-label'], templeVisible);
     }
@@ -1320,7 +1335,7 @@ def build_html(config: dict[str, Any]) -> str:
     function fitMapToPanel(panel) {
       if (!mapReady) return;
       if (!panel) return;
-      const routeFeatures = buildManualRoutesSourceData(panel.georef_panel_id).features;
+      const routeFeatures = buildCurrentPanelRoutesSourceData(panel.georef_panel_id).features;
       if (routeFeatures.length) {
         const bounds = new mapboxgl.LngLatBounds();
         routeFeatures.forEach((feature) => feature.geometry.coordinates.forEach((coord) => bounds.extend(coord)));
@@ -1396,6 +1411,23 @@ def build_html(config: dict[str, Any]) -> str:
       renderAll();
     }
 
+    function onAllRoutesClick(event) {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      const props = feature.properties || {};
+      const coordinates = feature.geometry?.coordinates || [];
+      const anchor = coordinates[Math.floor(coordinates.length / 2)] || coordinates[0];
+      if (!anchor) return;
+      new mapboxgl.Popup({ closeButton: true, offset: 10 })
+        .setLngLat(anchor)
+        .setHTML(
+          `<strong>p${props.page_no} / ${props.georef_panel_id || '-'}</strong><br>` +
+          `length_km=${((Number(props.length_m || 0)) / 1000).toFixed(2)}<br>` +
+          `vertex=${props.vertex_count || '-'} / status=${props.status || '-'}`
+        )
+        .addTo(map);
+    }
+
     function onTempleClick(event) {
       const feature = event.features?.[0];
       if (!feature) return;
@@ -1446,6 +1478,7 @@ def build_html(config: dict[str, Any]) -> str:
         `vertex_count: ${summary.vertexCount}`,
         `panel_length_km: ${(summary.lengthKm).toFixed(3)}`,
         `active_route: ${route ? route.route_id : '-'}`,
+        `all_routes_visible: ${allRoutesVisible}`,
         `reference_on_map: ${referenceVisible}`,
         `temple_markers: ${templeVisible} (${templePoints(panel).length})`,
       ].join('\\n');
@@ -1472,7 +1505,7 @@ def build_html(config: dict[str, Any]) -> str:
     async function writeRouteSegments(handle) {
       const dirHandle = await handle.getDirectoryHandle('route_segments', { create: true });
       for (const panel of sortedPanels()) {
-        const features = buildManualRoutesSourceData(panel.georef_panel_id).features;
+        const features = buildCurrentPanelRoutesSourceData(panel.georef_panel_id).features;
         const payload = JSON.stringify({ type: 'FeatureCollection', features }, null, 2);
         await writeFileToHandle(dirHandle, `${panel.georef_panel_id}.geojson`, payload);
       }
@@ -1653,6 +1686,13 @@ def build_html(config: dict[str, Any]) -> str:
       renderMapDebug();
     }
 
+    function setAllRoutesVisible(nextVisible) {
+      allRoutesVisible = nextVisible;
+      ui.toggleAllRoutesButton.textContent = allRoutesVisible ? 'All Routes ON' : 'All Routes OFF';
+      updateMapSources();
+      renderMapDebug();
+    }
+
     function setTempleVisible(nextVisible) {
       templeVisible = nextVisible;
       ui.toggleTempleButton.textContent = templeVisible ? 'Temple ON' : 'Temple OFF';
@@ -1675,7 +1715,8 @@ def build_html(config: dict[str, Any]) -> str:
       map.addControl(new mapboxgl.NavigationControl(), 'top-right');
       map.on('load', () => {
         mapReady = true;
-        ensureMapSource('manual-routes', { type: 'FeatureCollection', features: [] });
+        ensureMapSource('all-saved-routes', { type: 'FeatureCollection', features: [] });
+        ensureMapSource('current-panel-routes', { type: 'FeatureCollection', features: [] });
         ensureMapSource('active-route', { type: 'FeatureCollection', features: [] });
         ensureMapSource('reference-routes', { type: 'FeatureCollection', features: [] });
         ensureMapSource('temple-points', { type: 'FeatureCollection', features: [] });
@@ -1733,12 +1774,23 @@ def build_html(config: dict[str, Any]) -> str:
           },
         });
         map.addLayer({
-          id: 'manual-routes-line',
+          id: 'all-saved-routes-line',
           type: 'line',
-          source: 'manual-routes',
+          source: 'all-saved-routes',
+          paint: {
+            'line-color': '#991b1b',
+            'line-width': 2,
+            'line-opacity': 0.35,
+          },
+        });
+        map.addLayer({
+          id: 'current-panel-routes-line',
+          type: 'line',
+          source: 'current-panel-routes',
           paint: {
             'line-color': '#dc2626',
             'line-width': 4,
+            'line-opacity': 0.9,
           },
         });
         map.addLayer({
@@ -1753,7 +1805,8 @@ def build_html(config: dict[str, Any]) -> str:
         });
         map.on('click', onMapClick);
         map.on('dblclick', onMapDoubleClick);
-        map.on('click', 'manual-routes-line', onMapRouteClick);
+        map.on('click', 'current-panel-routes-line', onMapRouteClick);
+        map.on('click', 'all-saved-routes-line', onAllRoutesClick);
         map.on('click', 'temple-circle', onTempleClick);
         map.on('click', 'temple-number', onTempleClick);
         map.on('click', 'temple-label', onTempleClick);
@@ -1771,6 +1824,7 @@ def build_html(config: dict[str, Any]) -> str:
       ui.newRouteButton.addEventListener('click', () => { startNewRoute(currentPanelId); renderAll(); });
       ui.undoButton.addEventListener('click', onUndo);
       ui.saveButton.addEventListener('click', onSave);
+      ui.toggleAllRoutesButton.addEventListener('click', () => setAllRoutesVisible(!allRoutesVisible));
       ui.toggleReferenceButton.addEventListener('click', () => setReferenceVisible(!referenceVisible));
       ui.toggleTempleButton.addEventListener('click', () => setTempleVisible(!templeVisible));
       ui.panelNotes.addEventListener('input', onNotesInput);
