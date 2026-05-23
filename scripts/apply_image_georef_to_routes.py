@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 
 
-MAPBOX_SCALE = 0.01
 SHIKOKU_LON_RANGE = (132.0, 135.5)
 SHIKOKU_LAT_RANGE = (32.5, 34.8)
 
@@ -25,13 +24,30 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(handle))
 
 
-def read_mapbox_token(env_path: Path) -> str:
+def read_env_vars(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
-        return ""
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("MAPBOX_ACCESS_TOKEN="):
-            return line.partition("=")[2].strip()
-    return ""
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
+def read_mapbox_token(env_path: Path) -> str:
+    return read_env_vars(env_path).get("MAPBOX_ACCESS_TOKEN", "")
+
+
+def takram_image_dir(env_path: Path) -> Path:
+    env_vars = read_env_vars(env_path)
+    raw = env_vars.get("TAKRAM_IMAGE_DIR", "../takram-image")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (env_path.parent / candidate).resolve()
+    return candidate
 
 
 def fit_projective(source: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -59,28 +75,27 @@ def apply_projective(points: np.ndarray, params: np.ndarray) -> np.ndarray:
     return np.column_stack([u, v])
 
 
-def synthetic_to_pdf(coord: list[float]) -> tuple[float, float]:
-    return (coord[0] / MAPBOX_SCALE, -coord[1] / MAPBOX_SCALE)
-
-
-def frame_row_by_key(path: Path, page_no: int, frame_id: str) -> dict[str, Any]:
+def panel_row_by_key(path: Path, page_no: int, georef_panel_id: str) -> dict[str, Any]:
     for row in read_csv_rows(path):
-        if int(row["page_no"]) == page_no and row["frame_id"] == frame_id:
+        if int(row["page_no"]) == page_no and row["georef_panel_id"] == georef_panel_id:
             return row
-    raise SystemExit(f"frame が見つかりません: page={page_no} frame={frame_id}")
+    raise SystemExit(f"georef_panel が見つかりません: page={page_no} panel={georef_panel_id}")
 
 
-def load_routes(path: Path, page_no: int, frame_id: str) -> list[dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [
-        feature for feature in data.get("features", [])
-        if int(feature.get("properties", {}).get("page_no", -1)) == page_no
-        and feature.get("properties", {}).get("frame_id") == frame_id
-    ]
+def load_routes(paths: list[Path], page_no: int, georef_panel_id: str) -> list[dict[str, Any]]:
+    features: list[dict[str, Any]] = []
+    for path in paths:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        features.extend(
+            feature for feature in data.get("features", [])
+            if int(feature.get("properties", {}).get("page_no", -1)) == page_no
+            and feature.get("properties", {}).get("georef_panel_id") == georef_panel_id
+        )
+    return features
 
 
-def frame_bbox_from_json_or_csv(georef_json: dict[str, Any], frame_row: dict[str, Any]) -> dict[str, float]:
-    bbox = georef_json.get("pdf_frame_bbox") or georef_json.get("frame", {}).get("bbox_pt")
+def panel_bbox_from_json_or_csv(georef_json: dict[str, Any], panel_row: dict[str, Any]) -> dict[str, float]:
+    bbox = georef_json.get("pdf_panel_bbox") or georef_json.get("pdf_frame_bbox") or georef_json.get("frame", {}).get("bbox_pt")
     if bbox:
         return {
             "x0": float(bbox["x0"]),
@@ -88,11 +103,12 @@ def frame_bbox_from_json_or_csv(georef_json: dict[str, Any], frame_row: dict[str
             "x1": float(bbox["x1"]),
             "y1": float(bbox["y1"]),
         }
+    x0, y0, x1, y1 = [float(value) for value in str(panel_row["bbox_pt"]).split(";")]
     return {
-        "x0": float(frame_row["x0_pt"]),
-        "y0": float(frame_row["y0_pt"]),
-        "x1": float(frame_row["x1_pt"]),
-        "y1": float(frame_row["y1_pt"]),
+        "x0": x0,
+        "y0": y0,
+        "x1": x1,
+        "y1": y1,
     }
 
 
@@ -124,7 +140,7 @@ def point_in_shikoku(lon: float, lat: float) -> bool:
 
 
 def transform_line(line: list[list[float]], params: np.ndarray) -> tuple[list[list[float]], list[str]]:
-    pdf_points = np.array([synthetic_to_pdf(coord) for coord in line], dtype=float)
+    pdf_points = np.array(line, dtype=float)
     lonlat = apply_projective(pdf_points, params)
     issues: list[str] = []
     coords: list[list[float]] = []
@@ -243,7 +259,7 @@ def build_debug_html(
 
     const message = document.getElementById('message');
     message.textContent = [
-      `frame=${config.georef.frame_id}`,
+      `panel=${config.georef.georef_panel_id || config.georef.frame_id}`,
       `page=${config.georef.page_no}`,
       `routes=${config.transformedRoutes.features.length}`,
       `generated=${config.generatedAt}`,
@@ -368,24 +384,31 @@ def build_debug_html(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Apply saved overlay image georeferencing to frame routes.")
+    parser = argparse.ArgumentParser(description="Apply saved overlay image georeferencing to georef_panel routes.")
     parser.add_argument("--georef-json", type=Path, required=True)
-    parser.add_argument("--routes", type=Path, default=Path("artifacts/step3/merged_routes.geojson"))
-    parser.add_argument("--frames", type=Path, default=Path("artifacts/step2/frames.csv"))
+    parser.add_argument("--panels-csv", type=Path)
+    parser.add_argument("--accepted-main-routes", type=Path)
+    parser.add_argument("--accepted-inset-routes", type=Path)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--overlay-editor-dir", type=Path, default=Path("artifacts/overlay_georef_editor"))
     args = parser.parse_args()
 
+    image_repo_dir = takram_image_dir(args.env_file)
+    panel_route_dir = image_repo_dir / "artifacts" / "panel_route_detection"
+    panels_csv = args.panels_csv or (panel_route_dir / "georef_panels.csv")
+    accepted_main_routes = args.accepted_main_routes or (panel_route_dir / "accepted_main_georef_routes.geojson")
+    accepted_inset_routes = args.accepted_inset_routes or (panel_route_dir / "accepted_inset_georef_routes.geojson")
+
     georef_json = json.loads(args.georef_json.read_text(encoding="utf-8"))
     page_no = int(georef_json["page_no"])
-    frame_id = str(georef_json["frame_id"])
+    georef_panel_id = str(georef_json.get("georef_panel_id") or georef_json.get("frame_id"))
 
-    frame_row = frame_row_by_key(args.frames, page_no, frame_id)
-    pdf_bbox = frame_bbox_from_json_or_csv(georef_json, frame_row)
+    panel_row = panel_row_by_key(panels_csv, page_no, georef_panel_id)
+    pdf_bbox = panel_bbox_from_json_or_csv(georef_json, panel_row)
     params = build_projective_params(georef_json, pdf_bbox)
 
-    features = load_routes(args.routes, page_no, frame_id)
+    features = load_routes([accepted_main_routes, accepted_inset_routes], page_no, georef_panel_id)
     transformed_features: list[dict[str, Any]] = []
     review_rows: list[dict[str, Any]] = []
 
@@ -420,8 +443,8 @@ def main() -> None:
     write_geojson(args.out_dir / "transformed_routes.geojson", transformed_features)
     write_csv(args.out_dir / "review_status.csv", review_rows)
 
-    map_image = args.overlay_editor_dir / "images" / f"{frame_id}_map.png"
-    redlines_image = args.overlay_editor_dir / "images" / f"{frame_id}_redlines.png"
+    map_image = args.overlay_editor_dir / "images" / f"{georef_panel_id}_map.png"
+    redlines_image = args.overlay_editor_dir / "images" / f"{georef_panel_id}_redlines.png"
     map_image_path = None
     redlines_image_path = None
     if map_image.exists():

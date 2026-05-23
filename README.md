@@ -150,3 +150,20 @@ Step 8: Mapbox表示確認
 4. その後、抽出パイプラインのPythonスクリプトを作る
 
 作業は一気に最終GeoJSONまで進めず、まず「赤線候補の抽出精度」を確認できるところまで実装してください。
+
+## georef editor の兄弟リポジトリ参照
+
+- `takram-image` 側の生成物は `takram` に丸ごとコピーせず、兄弟ディレクトリとして参照する。
+- 想定構成:
+  - `~/Desktop/takram`
+  - `~/Desktop/takram-image`
+- 今回のローカル例では `takram-image` 相当のリポジトリは `~/Desktop/henro` に置く。
+- `takram/.env` に `TAKRAM_IMAGE_DIR=../henro` を設定する。
+- georef editor は以下の入力を `TAKRAM_IMAGE_DIR/artifacts/panel_route_detection/` から読む。
+  - `georef_panels.csv`
+  - `georef_panels.geojson`
+  - `accepted_main_georef_routes.geojson`
+  - `accepted_inset_georef_routes.geojson`
+- georef editor の選択単位は `layout_panel` ではなく `georef_panel`。
+- `accepted_main_routes.geojson` のような旧 route 入力は使わず、`accepted_main_georef_routes.geojson` / `accepted_inset_georef_routes.geojson` を使う。
+- 先に `takram-image` 側で `panel_route_detection` を実行してから、`takram` 側の georef editor を生成・利用する。

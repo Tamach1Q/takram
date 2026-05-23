@@ -31,60 +31,94 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
         return list(csv.DictReader(handle))
 
 
-def read_mapbox_token(env_path: Path) -> str:
+def read_env_vars(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
-        return ""
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("MAPBOX_ACCESS_TOKEN="):
-            return line.partition("=")[2].strip()
-    return ""
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
 
 
-def route_features_by_frame(path: Path) -> dict[tuple[int, str], list[dict[str, Any]]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+def read_mapbox_token(env_path: Path) -> str:
+    return read_env_vars(env_path).get("MAPBOX_ACCESS_TOKEN", "")
+
+
+def read_geojson(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def takram_image_dir(env_path: Path) -> Path:
+    env_vars = read_env_vars(env_path)
+    raw = env_vars.get("TAKRAM_IMAGE_DIR", "../takram-image")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (env_path.parent / candidate).resolve()
+    return candidate
+
+
+def route_features_by_panel(paths: list[Path]) -> dict[tuple[int, str], list[dict[str, Any]]]:
     grouped: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    for path in paths:
+        data = read_geojson(path)
+        for feature in data.get("features", []):
+            props = feature.get("properties", {})
+            page_no = props.get("page_no")
+            panel_id = props.get("georef_panel_id")
+            if page_no in (None, "") or not panel_id:
+                continue
+            grouped[(int(page_no), str(panel_id))].append(feature)
+    return grouped
+
+
+def panel_geojson_by_key(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
+    grouped: dict[tuple[int, str], dict[str, Any]] = {}
+    data = read_geojson(path)
     for feature in data.get("features", []):
         props = feature.get("properties", {})
         page_no = props.get("page_no")
-        frame_id = props.get("frame_id")
-        if page_no in (None, "") or not frame_id:
+        panel_id = props.get("georef_panel_id")
+        if page_no in (None, "") or not panel_id:
             continue
-        grouped[(int(page_no), str(frame_id))].append(feature)
+        grouped[(int(page_no), str(panel_id))] = feature
     return grouped
 
 
-def priority_by_frame(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
-    rows = read_csv_rows(path)
-    return {
-        (int(row["page_no"]), row["frame_id"]): row
-        for row in rows
-        if row.get("page_no") and row.get("frame_id")
-    }
+def parse_bbox_pt(text: str) -> dict[str, float]:
+    x0, y0, x1, y1 = [float(value) for value in text.split(";")]
+    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
 
 
-def frame_models_by_frame(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
-    if not path.exists():
-        return {}
-    rows = read_csv_rows(path)
-    return {
-        (int(row["page_no"]), row["frame_id"]): row
-        for row in rows
-        if row.get("page_no") and row.get("frame_id")
-    }
+def bbox_from_row(row: dict[str, Any]) -> dict[str, float]:
+    if {"x0_pt", "y0_pt", "x1_pt", "y1_pt"}.issubset(row):
+        return {
+            "x0": float(row["x0_pt"]),
+            "y0": float(row["y0_pt"]),
+            "x1": float(row["x1_pt"]),
+            "y1": float(row["y1_pt"]),
+        }
+    if row.get("bbox_pt"):
+        return parse_bbox_pt(str(row["bbox_pt"]))
+    raise KeyError("bbox_pt")
 
 
-def gcps_by_frame(path: Path) -> dict[tuple[int, str], list[dict[str, Any]]]:
-    if not path.exists():
-        return {}
-    grouped: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
-    for row in read_csv_rows(path):
-        if not row.get("page_no") or not row.get("frame_id"):
-            continue
-        grouped[(int(row["page_no"]), row["frame_id"])].append(row)
-    return grouped
+def bbox_area_pt2(bbox: dict[str, float]) -> float:
+    return max(0.0, bbox["x1"] - bbox["x0"]) * max(0.0, bbox["y1"] - bbox["y0"])
 
 
-def manual_gcps_by_frame(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
+def panel_key_from_mapping(data: dict[str, Any]) -> tuple[int, str] | None:
+    page_no = data.get("page_no")
+    panel_id = data.get("georef_panel_id") or data.get("frame_id")
+    if page_no in (None, "") or not panel_id:
+        return None
+    return (int(page_no), str(panel_id))
+
+
+def saved_georef_by_panel(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
     result: dict[tuple[int, str], dict[str, Any]] = {}
     if not path.exists():
         return result
@@ -93,39 +127,34 @@ def manual_gcps_by_frame(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
             data = json.loads(json_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
-        page_no = data.get("page_no")
-        frame_id = data.get("frame_id")
-        if page_no in (None, "") or not frame_id:
-            continue
-        result[(int(page_no), str(frame_id))] = data
-    return result
-
-
-def saved_georef_by_frame(path: Path) -> dict[tuple[int, str], dict[str, Any]]:
-    result: dict[tuple[int, str], dict[str, Any]] = {}
-    if not path.exists():
-        return result
-    for json_path in sorted(path.glob("page_*_*.json")):
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        page_no = data.get("page_no")
-        frame_id = data.get("frame_id")
-        if page_no in (None, "") or not frame_id:
+        key = panel_key_from_mapping(data)
+        if key is None:
             continue
         data["__path__"] = str(json_path)
-        result[(int(page_no), str(frame_id))] = data
+        result[key] = data
     return result
 
 
 def rounded_bbox(frame_row: dict[str, Any]) -> dict[str, float]:
+    bbox = bbox_from_row(frame_row)
     return {
-        "x0": round(float(frame_row["x0_pt"]), 3),
-        "y0": round(float(frame_row["y0_pt"]), 3),
-        "x1": round(float(frame_row["x1_pt"]), 3),
-        "y1": round(float(frame_row["y1_pt"]), 3),
+        "x0": round(bbox["x0"], 3),
+        "y0": round(bbox["y0"], 3),
+        "x1": round(bbox["x1"], 3),
+        "y1": round(bbox["y1"], 3),
     }
+
+
+def polygon_coords_from_feature(feature: dict[str, Any] | None) -> list[list[float]]:
+    if not feature:
+        return []
+    geometry = feature.get("geometry", {})
+    if geometry.get("type") != "Polygon":
+        return []
+    rings = geometry.get("coordinates", [])
+    if not rings:
+        return []
+    return [[round(float(coord[0]), 3), round(float(coord[1]), 3)] for coord in rings[0]]
 
 
 def render_frame_images(
@@ -136,11 +165,12 @@ def render_frame_images(
     render_scale: float,
 ) -> tuple[Image.Image, Image.Image]:
     page = doc[page_no - 1]
+    bbox = bbox_from_row(frame_row)
     clip = fitz.Rect(
-        float(frame_row["x0_pt"]),
-        float(frame_row["y0_pt"]),
-        float(frame_row["x1_pt"]),
-        float(frame_row["y1_pt"]),
+        bbox["x0"],
+        bbox["y0"],
+        bbox["x1"],
+        bbox["y1"],
     )
     pix = page.get_pixmap(matrix=fitz.Matrix(render_scale, render_scale), clip=clip, alpha=False)
     rgb = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -289,6 +319,7 @@ def estimate_initial_corners(
 ) -> tuple[dict[str, list[float]] | None, str]:
     candidate_rows = manual_anchor_rows(manual_gcp) if manual_gcp else []
     source_name = "manual_gcps"
+    bbox = bbox_from_row(frame_row)
     if len(candidate_rows) < 2:
         candidate_rows = auto_anchor_rows(auto_gcps)
         source_name = "auto_gcps"
@@ -308,10 +339,10 @@ def estimate_initial_corners(
             transformed_corners = apply_projective(
                 np.array(
                     [
-                        [float(frame_row["x0_pt"]), float(frame_row["y0_pt"])],
-                        [float(frame_row["x1_pt"]), float(frame_row["y0_pt"])],
-                        [float(frame_row["x1_pt"]), float(frame_row["y1_pt"])],
-                        [float(frame_row["x0_pt"]), float(frame_row["y1_pt"])],
+                        [bbox["x0"], bbox["y0"]],
+                        [bbox["x1"], bbox["y0"]],
+                        [bbox["x1"], bbox["y1"]],
+                        [bbox["x0"], bbox["y1"]],
                     ],
                     dtype=float,
                 ),
@@ -323,10 +354,10 @@ def estimate_initial_corners(
             transformed_corners = apply_similarity(
                 np.array(
                     [
-                        [float(frame_row["x0_pt"]), float(frame_row["y0_pt"])],
-                        [float(frame_row["x1_pt"]), float(frame_row["y0_pt"])],
-                        [float(frame_row["x1_pt"]), float(frame_row["y1_pt"])],
-                        [float(frame_row["x0_pt"]), float(frame_row["y1_pt"])],
+                        [bbox["x0"], bbox["y0"]],
+                        [bbox["x1"], bbox["y0"]],
+                        [bbox["x1"], bbox["y1"]],
+                        [bbox["x0"], bbox["y1"]],
                     ],
                     dtype=float,
                 ),
@@ -433,7 +464,8 @@ def choose_initial_view(
         rmse_m = None
         if frame_model and frame_model.get("rmse_m") not in (None, ""):
             rmse_m = float(frame_model["rmse_m"])
-        zoom = zoom_from_frame_metrics(area_pt2=float(frame_row["area_pt2"]), rmse_m=rmse_m)
+        area_pt2 = float(frame_row["area_pt2"]) if frame_row.get("area_pt2") not in (None, "") else bbox_area_pt2(bbox_from_row(frame_row))
+        zoom = zoom_from_frame_metrics(area_pt2=area_pt2, rmse_m=rmse_m)
     return center, round(clamp(zoom, 8.0, 17.0), 2)
 
 
@@ -924,14 +956,14 @@ def build_html(config: dict[str, Any]) -> str:
 <body>
   <div id="app">
     <div id="toolbar">
-      <div class="toolbarLabel">Frame</div>
+      <div class="toolbarLabel">Panel</div>
       <select id="frameSelect"></select>
       <div id="frameCount"></div>
       <button id="undoButton">Undo</button>
       <button id="clearButton">Clear</button>
       <button id="previewButton">Preview</button>
       <button id="saveButton" class="primary">Save</button>
-      <button id="nextButton">Next Frame</button>
+      <button id="nextButton">Next Panel</button>
       <div></div>
     </div>
     <div id="statusbar">
@@ -1065,8 +1097,8 @@ def build_html(config: dict[str, Any]) -> str:
         return false;
       }
       if (config.frames.length === 0) {
-        ui.stepText.textContent = 'frame がありません';
-        ui.notice.textContent = 'frame_manifest.json の frames が空です';
+        ui.stepText.textContent = 'panel がありません';
+        ui.notice.textContent = 'panel_manifest.json の panels が空です';
         return false;
       }
       return true;
@@ -1075,7 +1107,7 @@ def build_html(config: dict[str, Any]) -> str:
     function sortedFrames() {
       return [...config.frames].sort((a, b) => {
         const diff = Number(b.priority_score || 0) - Number(a.priority_score || 0);
-        return diff || (a.page_no - b.page_no) || a.frame_id.localeCompare(b.frame_id);
+        return diff || (a.page_no - b.page_no) || (a.georef_panel_id || a.frame_id).localeCompare(b.georef_panel_id || b.frame_id);
       });
     }
 
@@ -1133,12 +1165,12 @@ def build_html(config: dict[str, Any]) -> str:
       frames.forEach((frame, index) => {
         const option = document.createElement('option');
         option.value = frame.frame_id;
-        option.textContent = `${index + 1}/${frames.length}  ${frame.page_no} / ${frame.frame_id}`;
+        option.textContent = `${index + 1}/${frames.length}  p${frame.page_no} / ${frame.georef_panel_id} / ${frame.panel_type} / routes ${frame.route_count}`;
         ui.frameSelect.appendChild(option);
       });
       currentFrameId = config.default_frame_id || frames[0].frame_id;
       ui.frameSelect.value = currentFrameId;
-      ui.frameCount.textContent = `${frames.length} 件`;
+      ui.frameCount.textContent = `${frames.length} panels`;
     }
 
     function currentZoomPercent(state) {
@@ -1168,7 +1200,7 @@ def build_html(config: dict[str, Any]) -> str:
         ? `<span class="metricQuality ${preview.quality_status}">${preview.quality_status}</span>`
         : '';
       ui.metrics.innerHTML = `
-        <span class="metricMeta"><strong>frame</strong>: ${frame.frame_id} / <strong>pairs</strong>: ${done}</span>
+        <span class="metricMeta"><strong>panel</strong>: ${frame.georef_panel_id} / <strong>type</strong>: ${frame.panel_type} / <strong>routes</strong>: ${frame.route_count} / <strong>pairs</strong>: ${done}</span>
         <span class="metricActive">active: ${preview ? preview.transform_type : 'none'}</span>
         ${qualityBadge}
         <span class="metricRmse">RMSE ${activeRmse}</span>
@@ -1321,6 +1353,23 @@ def build_html(config: dict[str, Any]) -> str:
       pdfCtx.strokeStyle = 'rgba(29,78,216,0.95)';
       pdfCtx.lineWidth = 3;
       pdfCtx.strokeRect(layout.x, layout.y, layout.width, layout.height);
+      if (Array.isArray(frame.panel_polygon_pdf) && frame.panel_polygon_pdf.length >= 3) {
+        pdfCtx.save();
+        pdfCtx.beginPath();
+        frame.panel_polygon_pdf.forEach((coord, index) => {
+          const point = pdfToCanvas(layout, pagePtToPdfPx(frame, coord));
+          if (index === 0) {
+            pdfCtx.moveTo(point.x, point.y);
+          } else {
+            pdfCtx.lineTo(point.x, point.y);
+          }
+        });
+        pdfCtx.closePath();
+        pdfCtx.lineWidth = 2;
+        pdfCtx.strokeStyle = 'rgba(37,99,235,0.9)';
+        pdfCtx.stroke();
+        pdfCtx.restore();
+      }
 
       const severityByLabel = new Map((state.preview?.residual_ranking || []).map((row) => [row.label, row.severity]));
       state.controlPoints.forEach((pair, index) => {
@@ -1536,20 +1585,18 @@ def build_html(config: dict[str, Any]) -> str:
       ];
     }
 
-    function routeCoordToPdfPx(frame, coord) {
+    function pagePtToPdfPx(frame, coord) {
       const bbox = frame.pdf_bbox;
-      const pdfX = coord[0] / MAPBOX_SCALE;
-      const pdfY = -coord[1] / MAPBOX_SCALE;
       const scaleX = frame.image_width_px / (bbox.x1 - bbox.x0);
       const scaleY = frame.image_height_px / (bbox.y1 - bbox.y0);
       return [
-        (pdfX - bbox.x0) * scaleX,
-        (pdfY - bbox.y0) * scaleY,
+        (coord[0] - bbox.x0) * scaleX,
+        (coord[1] - bbox.y0) * scaleY,
       ];
     }
 
     function transformRouteGeometry(frame, geometry, model) {
-      const transformLine = (line) => line.map((coord) => model.apply(routeCoordToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
+      const transformLine = (line) => line.map((coord) => model.apply(pagePtToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
       if (geometry.type === 'LineString') {
         return { type: 'LineString', coordinates: transformLine(geometry.coordinates) };
       }
@@ -1632,8 +1679,10 @@ def build_html(config: dict[str, Any]) -> str:
       if (!state.preview) throw new Error('Preview を先に実行してください。');
       return {
         page_no: frame.page_no,
-        frame_id: frame.frame_id,
+        georef_panel_id: frame.georef_panel_id,
+        panel_type: frame.panel_type,
         transform_type: state.preview.transform_type,
+        pdf_panel_bbox: frame.pdf_bbox,
         control_points: state.controlPoints
           .filter((pair) => pair.pdf_px && pair.lonlat)
           .map((pair, index) => ({
@@ -1671,7 +1720,8 @@ def build_html(config: dict[str, Any]) -> str:
       } catch {
         ui.jsonPreview.textContent = JSON.stringify({
           page_no: frame.page_no,
-          frame_id: frame.frame_id,
+          georef_panel_id: frame.georef_panel_id,
+          panel_type: frame.panel_type,
           transform_type: currentTransformChoice(),
           control_points: state.controlPoints,
         }, null, 2);
@@ -2152,19 +2202,24 @@ def build_html(config: dict[str, Any]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build overlay georeferencing editor artifacts.")
     parser.add_argument("--pdf", type=Path, required=True)
-    parser.add_argument("--frames", type=Path, default=Path("artifacts/step2/frames.csv"))
-    parser.add_argument("--manual-review-queue", type=Path, default=Path("artifacts/step5/manual_review_queue.csv"))
-    parser.add_argument("--frame-models", type=Path, default=Path("artifacts/step5/frame_models.csv"))
-    parser.add_argument("--gcp-candidates", type=Path, default=Path("artifacts/step4/gcp_candidates.csv"))
-    parser.add_argument("--routes", type=Path, default=Path("artifacts/step3/merged_routes.geojson"))
-    parser.add_argument("--manual-gcp-dir", type=Path, default=Path("data/manual_gcps"))
+    parser.add_argument("--panels-csv", type=Path)
+    parser.add_argument("--panels-geojson", type=Path)
+    parser.add_argument("--accepted-main-routes", type=Path)
+    parser.add_argument("--accepted-inset-routes", type=Path)
     parser.add_argument("--saved-georef-dir", type=Path, default=Path("data/manual_image_georef"))
     parser.add_argument("--out-dir", type=Path, default=Path("artifacts/overlay_georef_editor"))
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--frame-id", action="append", default=[], help="Process only specific frame_id. Repeatable.")
-    parser.add_argument("--limit", type=int, default=0, help="Process only first N frames after sorting.")
+    parser.add_argument("--georef-panel-id", action="append", default=[], help="Process only specific georef_panel_id. Repeatable.")
+    parser.add_argument("--limit", type=int, default=0, help="Process only first N panels after sorting.")
     parser.add_argument("--render-scale", type=float, default=RENDER_SCALE)
     args = parser.parse_args()
+
+    image_repo_dir = takram_image_dir(args.env_file)
+    panel_route_dir = image_repo_dir / "artifacts" / "panel_route_detection"
+    panels_csv = args.panels_csv or (panel_route_dir / "georef_panels.csv")
+    panels_geojson = args.panels_geojson or (panel_route_dir / "georef_panels.geojson")
+    accepted_main_routes = args.accepted_main_routes or (panel_route_dir / "accepted_main_georef_routes.geojson")
+    accepted_inset_routes = args.accepted_inset_routes or (panel_route_dir / "accepted_inset_georef_routes.geojson")
 
     ensure_dir(args.out_dir)
     image_dir = args.out_dir / "images"
@@ -2173,27 +2228,30 @@ def main() -> None:
     ensure_dir(vector_dir)
     ensure_dir(args.saved_georef_dir)
 
-    frames = read_csv_rows(args.frames)
-    priority_rows = priority_by_frame(args.manual_review_queue)
-    frame_models = frame_models_by_frame(args.frame_models)
-    auto_gcps = gcps_by_frame(args.gcp_candidates)
-    manual_gcps = manual_gcps_by_frame(args.manual_gcp_dir)
-    saved_georef = saved_georef_by_frame(args.saved_georef_dir)
-    routes_by_frame = route_features_by_frame(args.routes)
+    panels = [
+        row for row in read_csv_rows(panels_csv)
+        if str(row.get("keep_for_georef", "")).strip().lower() == "true"
+    ]
+    panel_features = panel_geojson_by_key(panels_geojson)
+    saved_georef = saved_georef_by_panel(args.saved_georef_dir)
+    routes_by_frame = route_features_by_panel([accepted_main_routes, accepted_inset_routes])
     token = read_mapbox_token(args.env_file)
 
-    selected_frame_ids = set(args.frame_id)
+    selected_frame_ids = set(args.georef_panel_id)
     frame_rows: list[dict[str, Any]] = []
-    for frame_row in frames:
-        if selected_frame_ids and frame_row["frame_id"] not in selected_frame_ids:
+    for frame_row in panels:
+        frame_id = str(frame_row["georef_panel_id"])
+        if selected_frame_ids and frame_id not in selected_frame_ids:
             continue
+        page_no = int(frame_row["page_no"])
+        frame_row["__route_count"] = len(routes_by_frame.get((page_no, frame_id), []))
         frame_rows.append(frame_row)
 
     frame_rows.sort(
         key=lambda row: (
-            -float((priority_rows.get((int(row["page_no"]), row["frame_id"]), {}) or {}).get("priority_score", 0) or 0),
+            -int(row.get("__route_count", 0)),
             int(row["page_no"]),
-            row["frame_id"],
+            row["georef_panel_id"],
         )
     )
     if args.limit > 0:
@@ -2204,7 +2262,7 @@ def main() -> None:
     try:
         for frame_row in frame_rows:
             page_no = int(frame_row["page_no"])
-            frame_id = frame_row["frame_id"]
+            frame_id = frame_row["georef_panel_id"]
             key = (page_no, frame_id)
             map_image, redlines_image = render_frame_images(
                 doc=doc,
@@ -2221,26 +2279,19 @@ def main() -> None:
             vector_path = vector_dir / f"{frame_id}_routes.geojson"
             save_feature_collection(vector_path, features)
 
-            frame_model = frame_models.get(key)
-            manual_gcp = manual_gcps.get(key)
-            auto_rows = auto_gcps.get(key, [])
             saved_row = saved_georef.get(key)
             saved_corners = saved_row.get("corners_lonlat") if saved_row else None
-            initial_corners, initial_transform_source = estimate_initial_corners(
-                frame_row=frame_row,
-                manual_gcp=manual_gcp,
-                auto_gcps=auto_rows,
-            )
+            initial_corners = None
+            initial_transform_source = "fallback_view"
             initial_center, initial_zoom = choose_initial_view(
                 frame_row=frame_row,
-                frame_model=frame_model,
-                manual_gcp=manual_gcp,
-                auto_gcps=auto_rows,
+                frame_model=None,
+                manual_gcp=None,
+                auto_gcps=[],
                 saved_georef=saved_row,
                 image_width_px=map_image.width,
                 image_height_px=map_image.height,
             )
-            priority_row = priority_rows.get(key, {})
             corners_for_view = saved_corners or initial_corners
             if corners_for_view:
                 points = corners_dict_to_points(corners_for_view)
@@ -2249,18 +2300,26 @@ def main() -> None:
                     zoom = zoom_from_extent(points=points, image_width_px=map_image.width, image_height_px=map_image.height)
                     if zoom is not None:
                         initial_zoom = round(clamp(zoom, 8.0, 17.0), 2)
+            panel_bbox = rounded_bbox(frame_row)
+            panel_area_pt2 = bbox_area_pt2(panel_bbox)
+            panel_feature = panel_features.get(key)
             manifest_frames.append(
                 {
                     "frame_id": frame_id,
+                    "georef_panel_id": frame_id,
                     "page_no": page_no,
-                    "priority_score": round(float(priority_row.get("priority_score", 0) or 0), 3),
-                    "priority_reason": priority_row.get("priority_reason", ""),
+                    "panel_type": frame_row.get("panel_type", ""),
+                    "source_panel_type": frame_row.get("source_panel_type", ""),
+                    "layout_panel_id": frame_row.get("layout_panel_id", ""),
+                    "priority_score": float(frame_row.get("__route_count", 0)),
+                    "priority_reason": "route_count",
                     "route_count": len(features),
                     "image_path": f"images/{frame_id}_map.png",
                     "redlines_path": f"images/{frame_id}_redlines.png",
                     "vector_geojson_path": f"vectors/{frame_id}_routes.geojson",
                     "route_geojson": {"type": "FeatureCollection", "features": features},
-                    "pdf_bbox": rounded_bbox(frame_row),
+                    "pdf_bbox": panel_bbox,
+                    "panel_polygon_pdf": polygon_coords_from_feature(panel_feature),
                     "image_width_px": map_image.width,
                     "image_height_px": map_image.height,
                     "initial_center": initial_center,
@@ -2270,12 +2329,13 @@ def main() -> None:
                     "has_saved_georef": bool(saved_corners),
                     "saved_corners": saved_corners,
                     "saved_georef_path": str(saved_row.get("__path__", "")) if saved_row else "",
-                    "manual_geo_points": serializable_manual_geo_points(manual_gcp),
-                    "auto_geo_points": serializable_auto_geo_points(auto_rows),
+                    "manual_geo_points": [],
+                    "auto_geo_points": [],
                     "suggested_download_filename": f"page_{page_no:03d}_{frame_id}.json",
-                    "frame_area_pt2": round(float(frame_row["area_pt2"]), 3),
-                    "rmse_m": None if not frame_model or frame_model.get("rmse_m") in (None, "") else round(float(frame_model["rmse_m"]), 3),
-                    "quality_status": (frame_model or {}).get("quality_status", ""),
+                    "frame_area_pt2": round(panel_area_pt2, 3),
+                    "panel_area_pt2": round(panel_area_pt2, 3),
+                    "rmse_m": None,
+                    "quality_status": "",
                 }
             )
     finally:
@@ -2288,11 +2348,13 @@ def main() -> None:
         "initial_map_center": DEFAULT_CENTER,
         "initial_map_zoom": DEFAULT_ZOOM,
         "default_frame_id": manifest_frames[0]["frame_id"] if manifest_frames else "",
+        "default_georef_panel_id": manifest_frames[0]["georef_panel_id"] if manifest_frames else "",
         "frame_count": len(manifest_frames),
+        "panel_count": len(manifest_frames),
         "frames": manifest_frames,
     }
 
-    (args.out_dir / "frame_manifest.json").write_text(
+    (args.out_dir / "panel_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -2300,12 +2362,12 @@ def main() -> None:
 
     image_count = len(list(image_dir.glob("*_map.png"))) + len(list(image_dir.glob("*_redlines.png")))
     vector_count = len(list(vector_dir.glob("*_routes.geojson")))
-    print(f"Wrote {len(manifest_frames)} frames to {args.out_dir}")
+    print(f"Wrote {len(manifest_frames)} panels to {args.out_dir}")
     print("Sanity check:")
-    print(f"  frame_count={len(manifest_frames)}")
+    print(f"  panel_count={len(manifest_frames)}")
     print(f"  image_count={image_count}")
     print(f"  route_geojson_count={vector_count}")
-    print(f"  default_frame={manifest['default_frame_id'] or '(empty)'}")
+    print(f"  default_panel={manifest['default_georef_panel_id'] or '(empty)'}")
 
 
 if __name__ == "__main__":
