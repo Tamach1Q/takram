@@ -977,9 +977,11 @@ def build_html(config: dict[str, Any]) -> str:
           <div class="paneTitle">PDF</div>
           <div class="paneControls">
             <select id="pdfDisplaySelect">
-              <option value="both">両方</option>
               <option value="map">元地図</option>
-              <option value="redlines">赤線のみ</option>
+              <option value="rawMask">Raw red mask</option>
+              <option value="accepted">Accepted routes</option>
+              <option value="mapAccepted">元地図 + Accepted routes</option>
+              <option value="rawMaskAccepted">Raw red mask + Accepted routes</option>
             </select>
             <button id="zoomOutButton" class="subtleButton">-</button>
             <button id="zoomInButton" class="subtleButton">+</button>
@@ -1223,6 +1225,87 @@ def build_html(config: dict[str, Any]) -> str:
       return tokens.join(' | ');
     }
 
+    function routeLinesFromFeature(feature) {
+      const geometry = feature?.geometry || {};
+      if (geometry.type === 'LineString') return [geometry.coordinates || []];
+      if (geometry.type === 'MultiLineString') return geometry.coordinates || [];
+      return [];
+    }
+
+    function routeCoordStats(frame) {
+      const features = frame.route_geojson?.features || [];
+      const coords = [];
+      features.forEach((feature) => {
+        routeLinesFromFeature(feature).forEach((line) => {
+          line.forEach((coord) => coords.push(coord));
+        });
+      });
+      if (!coords.length) {
+        return {
+          featureCount: 0,
+          bbox: null,
+          insidePanel: false,
+          coordSpaceGuess: 'unknown',
+        };
+      }
+      const xs = coords.map((coord) => Number(coord[0]));
+      const ys = coords.map((coord) => Number(coord[1]));
+      const bbox = {
+        x0: Math.min(...xs),
+        y0: Math.min(...ys),
+        x1: Math.max(...xs),
+        y1: Math.max(...ys),
+      };
+      const panel = frame.pdf_bbox;
+      const panelWidthPt = Math.max(1e-6, panel.x1 - panel.x0);
+      const panelHeightPt = Math.max(1e-6, panel.y1 - panel.y0);
+      const imageWidthPx = Math.max(1, frame.image_width_px);
+      const imageHeightPx = Math.max(1, frame.image_height_px);
+      const tolerancePt = Math.max(6, Math.min(panelWidthPt, panelHeightPt) * 0.02);
+      const insidePanel = (
+        bbox.x0 >= panel.x0 - tolerancePt &&
+        bbox.x1 <= panel.x1 + tolerancePt &&
+        bbox.y0 >= panel.y0 - tolerancePt &&
+        bbox.y1 <= panel.y1 + tolerancePt
+      );
+      const insidePanelLocalPt = (
+        bbox.x0 >= -tolerancePt &&
+        bbox.x1 <= panelWidthPt + tolerancePt &&
+        bbox.y0 >= -tolerancePt &&
+        bbox.y1 <= panelHeightPt + tolerancePt
+      );
+      const insideImagePx = (
+        bbox.x0 >= -8 &&
+        bbox.x1 <= imageWidthPx + 8 &&
+        bbox.y0 >= -8 &&
+        bbox.y1 <= imageHeightPx + 8
+      );
+      const nearPanelNeighborhood = (
+        bbox.x0 >= panel.x0 - (panelWidthPt * 0.75) &&
+        bbox.x1 <= panel.x1 + (panelWidthPt * 0.75) &&
+        bbox.y0 >= panel.y0 - (panelHeightPt * 0.75) &&
+        bbox.y1 <= panel.y1 + (panelHeightPt * 0.75)
+      );
+      let coordSpaceGuess = 'unknown';
+      if (insidePanel || nearPanelNeighborhood) {
+        coordSpaceGuess = 'page_pdf_pt';
+      } else if (insidePanelLocalPt && !insideImagePx) {
+        coordSpaceGuess = 'panel_local_pt';
+      } else if (insideImagePx && !insidePanelLocalPt) {
+        coordSpaceGuess = 'image_px';
+      } else if (insidePanelLocalPt) {
+        coordSpaceGuess = 'panel_local_pt';
+      } else if (insideImagePx) {
+        coordSpaceGuess = 'image_px';
+      }
+      return {
+        featureCount: features.length,
+        bbox,
+        insidePanel,
+        coordSpaceGuess,
+      };
+    }
+
     function qualityStatusForRmse(rmse) {
       if (!Number.isFinite(rmse)) return 'review';
       if (rmse < 50) return 'pass';
@@ -1327,6 +1410,7 @@ def build_html(config: dict[str, Any]) -> str:
       const frame = frameById(currentFrameId);
       const state = getState(frame);
       const layoutMode = applyLayout(frame);
+      const routeStats = routeCoordStats(frame);
       const rect = resizePdfCanvas();
       clearPdfError();
       pdfCtx.clearRect(0, 0, rect.width, rect.height);
@@ -1336,15 +1420,41 @@ def build_html(config: dict[str, Any]) -> str:
 
       try {
         const mode = ui.pdfDisplaySelect.value;
-        if (mode !== 'redlines') {
+        const showBaseMap = mode === 'map' || mode === 'mapAccepted';
+        const showRawMask = mode === 'rawMask' || mode === 'rawMaskAccepted';
+        const showAcceptedRoutes = mode === 'accepted' || mode === 'mapAccepted' || mode === 'rawMaskAccepted';
+        if (showBaseMap) {
           const baseImage = await loadImage(frame.image_path);
           pdfCtx.drawImage(baseImage, layout.x, layout.y, layout.width, layout.height);
         }
-        if (mode !== 'map') {
+        if (showRawMask) {
           const redImage = await loadImage(frame.redlines_path);
-          pdfCtx.globalAlpha = mode === 'both' ? 0.92 : 1;
+          pdfCtx.globalAlpha = 0.48;
           pdfCtx.drawImage(redImage, layout.x, layout.y, layout.width, layout.height);
           pdfCtx.globalAlpha = 1;
+        }
+        if (showAcceptedRoutes) {
+          pdfCtx.save();
+          pdfCtx.beginPath();
+          (frame.route_geojson?.features || []).forEach((feature) => {
+            routeLinesFromFeature(feature).forEach((line) => {
+              line.forEach((coord, index) => {
+                const pdfPoint = routeCoordToPdfPx(frame, coord, routeStats.coordSpaceGuess);
+                const point = pdfToCanvas(layout, pdfPoint);
+                if (index === 0) {
+                  pdfCtx.moveTo(point.x, point.y);
+                } else {
+                  pdfCtx.lineTo(point.x, point.y);
+                }
+              });
+            });
+          });
+          pdfCtx.strokeStyle = 'rgba(220,38,38,0.96)';
+          pdfCtx.lineWidth = 3.6;
+          pdfCtx.lineCap = 'round';
+          pdfCtx.lineJoin = 'round';
+          pdfCtx.stroke();
+          pdfCtx.restore();
         }
       } catch (error) {
         showPdfError(error.message);
@@ -1387,6 +1497,11 @@ def build_html(config: dict[str, Any]) -> str:
       ui.pdfDebug.textContent = [
         `image_width_px: ${frame.image_width_px}`,
         `image_height_px: ${frame.image_height_px}`,
+        `route_feature_count: ${routeStats.featureCount}`,
+        `route_coord_bbox: ${routeStats.bbox ? `${routeStats.bbox.x0.toFixed(2)}, ${routeStats.bbox.y0.toFixed(2)}, ${routeStats.bbox.x1.toFixed(2)}, ${routeStats.bbox.y1.toFixed(2)}` : '-'}`,
+        `pdf_panel_bbox: ${frame.pdf_bbox.x0.toFixed(2)}, ${frame.pdf_bbox.y0.toFixed(2)}, ${frame.pdf_bbox.x1.toFixed(2)}, ${frame.pdf_bbox.y1.toFixed(2)}`,
+        `route_bbox_inside_panel: ${routeStats.insidePanel}`,
+        `route_coord_space_guess: ${routeStats.coordSpaceGuess}`,
         `canvas_width: ${Math.round(rect.width)}`,
         `canvas_height: ${Math.round(rect.height)}`,
         `layout mode: ${layoutMode}`,
@@ -1595,8 +1710,26 @@ def build_html(config: dict[str, Any]) -> str:
       ];
     }
 
+    function panelLocalPtToPdfPx(frame, coord) {
+      const bbox = frame.pdf_bbox;
+      const scaleX = frame.image_width_px / (bbox.x1 - bbox.x0);
+      const scaleY = frame.image_height_px / (bbox.y1 - bbox.y0);
+      return [
+        coord[0] * scaleX,
+        coord[1] * scaleY,
+      ];
+    }
+
+    function routeCoordToPdfPx(frame, coord, coordSpaceGuess = null) {
+      const guess = coordSpaceGuess || routeCoordStats(frame).coordSpaceGuess;
+      if (guess === 'image_px') return [coord[0], coord[1]];
+      if (guess === 'panel_local_pt') return panelLocalPtToPdfPx(frame, coord);
+      return pagePtToPdfPx(frame, coord);
+    }
+
     function transformRouteGeometry(frame, geometry, model) {
-      const transformLine = (line) => line.map((coord) => model.apply(pagePtToPdfPx(frame, coord)).map((value) => Number(value.toFixed(7))));
+      const routeStats = routeCoordStats(frame);
+      const transformLine = (line) => line.map((coord) => model.apply(routeCoordToPdfPx(frame, coord, routeStats.coordSpaceGuess)).map((value) => Number(value.toFixed(7))));
       if (geometry.type === 'LineString') {
         return { type: 'LineString', coordinates: transformLine(geometry.coordinates) };
       }
