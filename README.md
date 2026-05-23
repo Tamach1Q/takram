@@ -167,3 +167,62 @@ Step 8: Mapbox表示確認
 - georef editor の選択単位は `layout_panel` ではなく `georef_panel`。
 - `accepted_main_routes.geojson` のような旧 route 入力は使わず、`accepted_main_georef_routes.geojson` / `accepted_inset_georef_routes.geojson` を使う。
 - 先に `takram-image` 側で `panel_route_detection` を実行してから、`takram` 側の georef editor を生成・利用する。
+
+## manual route editor
+
+- 自動抽出 route を最終採用せず、左の PDF crop を見ながら右の Mapbox 上で人間が直接 LineString を描く専用エディタを用意する。
+- 入力は `TAKRAM_IMAGE_DIR/artifacts/panel_route_detection/` から読む。
+  - `georef_panels.csv`
+  - `georef_panels.geojson`
+  - `accepted_main_georef_routes.geojson`
+  - `accepted_inset_georef_routes.geojson`
+- `accepted_*_georef_routes.geojson` は参考レイヤー扱いで、最終データにはしない。
+
+### ローカル構成
+
+- 想定構成:
+  - `~/Desktop/takram`
+  - `~/Desktop/henro`
+- `takram/.env` に以下を設定する。
+  - `TAKRAM_IMAGE_DIR=../henro`
+  - `MAPBOX_ACCESS_TOKEN=...`
+
+### build
+
+- まず `henro` 側で `panel_route_detection` を実行しておく。
+- その後 `takram` 側で manual route editor を生成する。
+
+```bash
+.venv/bin/python scripts/build_manual_route_editor.py \
+  --pdf '四国遍路ひとり歩き同行二人（地図編）第14版第1刷.pdf' \
+  --out-dir artifacts/manual_route_editor \
+  --env-file .env
+```
+
+- 1つの georef panel だけを対象にした MVP 確認は `--georef-panel-id` を使う。
+
+```bash
+.venv/bin/python scripts/build_manual_route_editor.py \
+  --pdf '四国遍路ひとり歩き同行二人（地図編）第14版第1刷.pdf' \
+  --georef-panel-id G027_01 \
+  --out-dir artifacts/manual_route_editor \
+  --env-file .env
+```
+
+### 使い方
+
+- `python -m http.server 8131 -d artifacts/manual_route_editor` で配信する。
+- 左ペインは georef panel の PDF crop 参照用。
+- 右ペインは Mapbox 手打ち用。
+  - `click`: 点追加
+  - `Shift + click`: 新しい LineString 開始
+  - `double click`: 現在の LineString 確定
+  - `Z`: Undo
+  - `Backspace`: 最後の点削除
+  - `S`: 保存
+  - `N / P`: 次 / 前の panel
+- 保存先をブラウザから直接更新したい場合は `Bind Output Dir` で `artifacts/manual_route_editor` を選ぶ。
+- 保存される主な出力:
+  - `artifacts/manual_route_editor/manual_routes.geojson`
+  - `artifacts/manual_route_editor/autosave.json`
+  - `artifacts/manual_route_editor/route_segments/`
