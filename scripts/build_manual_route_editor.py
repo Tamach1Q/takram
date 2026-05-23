@@ -33,6 +33,12 @@ def read_geojson(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_optional_csv_rows(path: Path | None) -> list[dict[str, Any]]:
+    if not path or not path.exists():
+        return []
+    return read_csv_rows(path)
+
+
 def read_env_vars(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
         return {}
@@ -76,6 +82,13 @@ def rounded_bbox(row: dict[str, Any]) -> dict[str, float]:
 
 def bbox_area_pt2(bbox: dict[str, float]) -> float:
     return max(0.0, bbox["x1"] - bbox["x0"]) * max(0.0, bbox["y1"] - bbox["y0"])
+
+
+def point_in_bbox(x: float, y: float, bbox: dict[str, float], *, margin: float = 0.0) -> bool:
+    return (
+        bbox["x0"] - margin <= x <= bbox["x1"] + margin
+        and bbox["y0"] - margin <= y <= bbox["y1"] + margin
+    )
 
 
 def route_features_by_panel(paths: list[Path]) -> dict[tuple[int, str], list[dict[str, Any]]]:
@@ -224,6 +237,95 @@ def serializable_manual_geo_points(data: dict[str, Any] | None) -> list[dict[str
     return points
 
 
+def serializable_auto_geo_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        if row.get("longitude") in (None, "") or row.get("latitude") in (None, ""):
+            continue
+        points.append(
+            {
+                "index": index,
+                "name": row.get("source_name_text") or row.get("gazetteer_name_short") or row.get("gcp_id") or f"auto_{index}",
+                "role": row.get("source_kind", ""),
+                "longitude": round(float(row["longitude"]), 7),
+                "latitude": round(float(row["latitude"]), 7),
+            }
+        )
+    return points
+
+
+def serializable_temple_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best_by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        if row.get("longitude") in (None, "") or row.get("latitude") in (None, ""):
+            continue
+        key = (
+            str(row.get("temple_group", "")),
+            str(row.get("temple_no", "")),
+            str(row.get("longitude", "")),
+            str(row.get("latitude", "")),
+        )
+        confidence = float(row.get("confidence") or 0.0)
+        current = best_by_key.get(key)
+        if current is not None and float(current.get("confidence") or 0.0) >= confidence:
+            continue
+        temple_group = str(row.get("temple_group", ""))
+        temple_no = str(row.get("temple_no", ""))
+        no_label = f"別{temple_no}" if temple_group == "bekkaku" else temple_no
+        best_by_key[key] = {
+            "gcp_id": row.get("gcp_id", ""),
+            "temple_group": temple_group,
+            "temple_no": temple_no,
+            "temple_no_label": no_label,
+            "name_full": row.get("gazetteer_name_full") or row.get("source_name_text") or "",
+            "name_short": row.get("gazetteer_name_short") or row.get("source_name_text") or "",
+            "source_name_text": row.get("source_name_text", ""),
+            "longitude": round(float(row["longitude"]), 7),
+            "latitude": round(float(row["latitude"]), 7),
+            "confidence": confidence,
+            "needs_manual_review": str(row.get("needs_manual_review", "")).strip().lower() == "true",
+            "review_reasons": row.get("review_reasons", ""),
+            "source_kind": row.get("source_kind", ""),
+        }
+    return sorted(
+        best_by_key.values(),
+        key=lambda row: (row["temple_group"], int(row["temple_no"] or 0), row["name_short"]),
+    )
+
+
+def gcp_rows_by_panel(
+    panel_rows: list[dict[str, Any]],
+    gcp_rows: list[dict[str, Any]],
+) -> dict[tuple[int, str], list[dict[str, Any]]]:
+    panels_by_page: dict[int, list[tuple[str, dict[str, float]]]] = defaultdict(list)
+    for panel_row in panel_rows:
+        panels_by_page[int(panel_row["page_no"])].append((str(panel_row["georef_panel_id"]), parse_bbox_pt(panel_row["bbox_pt"])))
+
+    grouped: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in gcp_rows:
+        if row.get("page_no") in (None, ""):
+            continue
+        page_no = int(row["page_no"])
+        x_value = row.get("pdf_anchor_x_pt") or row.get("pdf_label_x_pt")
+        y_value = row.get("pdf_anchor_y_pt") or row.get("pdf_label_y_pt")
+        if x_value in (None, "") or y_value in (None, ""):
+            continue
+        x = float(x_value)
+        y = float(y_value)
+        for panel_id, bbox in panels_by_page.get(page_no, []):
+            if point_in_bbox(x, y, bbox, margin=0.5):
+                grouped[(page_no, panel_id)].append(row)
+                break
+    return grouped
+
+
+def first_existing_path(paths: list[Path]) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+
 def choose_initial_view(saved_row: dict[str, Any] | None, image_width_px: int, image_height_px: int) -> tuple[list[float], float]:
     if saved_row and saved_row.get("corners_lonlat"):
         points = corners_dict_to_points(saved_row["corners_lonlat"])
@@ -259,7 +361,7 @@ def build_html(config: dict[str, Any]) -> str:
     #app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; min-height: 0; }
     #toolbar {
       display: grid;
-      grid-template-columns: auto minmax(280px, 420px) auto auto auto auto auto auto auto auto;
+      grid-template-columns: auto minmax(320px, 1fr) auto repeat(8, auto);
       gap: 8px;
       align-items: center;
       padding: 10px 12px;
@@ -324,6 +426,7 @@ def build_html(config: dict[str, Any]) -> str:
     .paneTitle { font-size: 13px; font-weight: 900; letter-spacing: 0.04em; }
     .paneControls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     #pdfCanvas { position: absolute; top: 0; left: 0; display: block; cursor: grab; touch-action: none; }
+    #pdfCanvas.dragging { cursor: grabbing; }
     #map { position: absolute; inset: 0; }
     #pdfDebug, #mapDebug {
       position: absolute;
@@ -442,6 +545,7 @@ def build_html(config: dict[str, Any]) -> str:
       <button id="undoButton">Undo</button>
       <button id="saveButton" class="primary">Save</button>
       <button id="toggleReferenceButton">Reference OFF</button>
+      <button id="toggleTempleButton">Temple ON</button>
     </div>
     <div id="statusbar">
       <div id="stepText">右の Mapbox をクリックしてルートを描きます</div>
@@ -459,15 +563,17 @@ def build_html(config: dict[str, Any]) -> str:
               <option value="accepted">Accepted routes reference</option>
               <option value="mapAccepted">元地図 + reference</option>
             </select>
+            <button id="pdfFitAllButton">Fit All</button>
+            <button id="pdfFitHeightButton">Fit Height</button>
+            <button id="pdfFitWidthButton">Fit Width</button>
             <button id="pdfZoomOutButton">-</button>
             <button id="pdfZoomInButton">+</button>
-            <button id="pdfFitButton">Fit Width</button>
           </div>
         </div>
         <canvas id="pdfCanvas"></canvas>
         <div class="help">
           左は参照専用です。<br/>
-          右クリック操作は不要です。<br/>
+          Fit All が初期値です。ドラッグで pan、wheel / trackpad で zoom できます。<br/>
           Accepted routes reference は壊れている可能性があるため参考表示です。
         </div>
         <pre id="pdfDebug"></pre>
@@ -487,7 +593,10 @@ def build_html(config: dict[str, Any]) -> str:
         <div class="help">
           click: 点追加 / segment click: 中間点追加 / drag vertex: 移動<br/>
           Shift+click: 新しいLineString / double click: 現在のLineString確定<br/>
-          Z: Undo / Backspace: 最後の点削除 / S: 保存 / N,P: panel移動
+          Z: Undo / Backspace: 最後の点削除 / S: 保存 / N,P: panel移動<br/>
+          直線は少ない点でよい。曲がり角、分岐、橋、寺入口では必ず点を打つ。<br/>
+          カーブでは赤線が道路から外れない程度に点を追加する。山道や細い道はやや細かく打つ。<br/>
+          目安: 直線100〜300m / カーブ30〜80m / 山道10〜50m
         </div>
         <pre id="mapDebug"></pre>
         <div id="notesPanel">
@@ -515,10 +624,13 @@ def build_html(config: dict[str, Any]) -> str:
       undoButton: document.getElementById('undoButton'),
       saveButton: document.getElementById('saveButton'),
       toggleReferenceButton: document.getElementById('toggleReferenceButton'),
+      toggleTempleButton: document.getElementById('toggleTempleButton'),
       pdfDisplaySelect: document.getElementById('pdfDisplaySelect'),
+      pdfFitAllButton: document.getElementById('pdfFitAllButton'),
+      pdfFitHeightButton: document.getElementById('pdfFitHeightButton'),
+      pdfFitWidthButton: document.getElementById('pdfFitWidthButton'),
       pdfZoomOutButton: document.getElementById('pdfZoomOutButton'),
       pdfZoomInButton: document.getElementById('pdfZoomInButton'),
-      pdfFitButton: document.getElementById('pdfFitButton'),
       editModeSelect: document.getElementById('editModeSelect'),
       stepText: document.getElementById('stepText'),
       metrics: document.getElementById('metrics'),
@@ -539,11 +651,13 @@ def build_html(config: dict[str, Any]) -> str:
     let vertexMarkers = [];
     let outputDirHandle = null;
     let referenceVisible = false;
+    let templeVisible = true;
     const historyByPanel = new Map();
     const state = {
       panels: {},
       activeRouteIdByPanel: {},
       storageUpdatedAt: null,
+      lastMapView: null,
     };
 
     function ensurePanelState(panelId) {
@@ -564,6 +678,7 @@ def build_html(config: dict[str, Any]) -> str:
     function getPanelViewState(panel) {
       if (!panelViewState.has(panel.georef_panel_id)) {
         panelViewState.set(panel.georef_panel_id, {
+          fitMode: 'all',
           zoom: 1,
           panX: 0,
           panY: 0,
@@ -592,6 +707,18 @@ def build_html(config: dict[str, Any]) -> str:
 
     function panelNotes(panelId) {
       return ensurePanelState(panelId).notes || '';
+    }
+
+    function manualGeoPoints(panel) {
+      return panel?.manual_geo_points || [];
+    }
+
+    function autoGeoPoints(panel) {
+      return panel?.auto_geo_points || [];
+    }
+
+    function templePoints(panel) {
+      return panel?.temple_points || [];
     }
 
     function activeRouteId(panelId = currentPanelId) {
@@ -704,6 +831,7 @@ def build_html(config: dict[str, Any]) -> str:
         updated_at: new Date().toISOString(),
         panels: state.panels,
         active_route_id_by_panel: state.activeRouteIdByPanel,
+        last_map_view: state.lastMapView,
       };
     }
 
@@ -825,18 +953,28 @@ def build_html(config: dict[str, Any]) -> str:
       return rect;
     }
 
-    function fitPdfWidth(panel, rect, view) {
-      const baseScale = rect.width / panel.image_width_px;
+    function pdfBaseScale(panel, rect, fitMode = 'all') {
+      const widthScale = rect.width / panel.image_width_px;
+      const heightScale = rect.height / panel.image_height_px;
+      if (fitMode === 'width') return widthScale;
+      if (fitMode === 'height') return heightScale;
+      return Math.min(widthScale, heightScale);
+    }
+
+    function applyPdfFit(panel, rect, view, fitMode = 'all') {
+      const baseScale = pdfBaseScale(panel, rect, fitMode);
+      const scaledWidth = panel.image_width_px * baseScale;
       const scaledHeight = panel.image_height_px * baseScale;
+      view.fitMode = fitMode;
       view.zoom = 1;
-      view.panX = 0;
+      view.panX = (rect.width - scaledWidth) / 2;
       view.panY = (rect.height - scaledHeight) / 2;
       view.fitApplied = true;
     }
 
     function currentPdfLayout(panel, rect, view) {
-      if (!view.fitApplied) fitPdfWidth(panel, rect, view);
-      const baseScale = rect.width / panel.image_width_px;
+      if (!view.fitApplied) applyPdfFit(panel, rect, view, view.fitMode || 'all');
+      const baseScale = pdfBaseScale(panel, rect, view.fitMode || 'all');
       const scale = baseScale * view.zoom;
       return {
         x: view.panX,
@@ -845,6 +983,17 @@ def build_html(config: dict[str, Any]) -> str:
         width: panel.image_width_px * scale,
         height: panel.image_height_px * scale,
       };
+    }
+
+    function zoomPdfAtPoint(panel, view, rect, pointerX, pointerY, factor) {
+      const layout = currentPdfLayout(panel, rect, view);
+      const imageX = (pointerX - layout.x) / layout.scale;
+      const imageY = (pointerY - layout.y) / layout.scale;
+      view.zoom = Math.max(0.25, Math.min(10, view.zoom * factor));
+      const newScale = pdfBaseScale(panel, rect, view.fitMode || 'all') * view.zoom;
+      view.panX = pointerX - (imageX * newScale);
+      view.panY = pointerY - (imageY * newScale);
+      view.fitApplied = true;
     }
 
     async function drawPdfPane() {
@@ -885,6 +1034,8 @@ def build_html(config: dict[str, Any]) -> str:
         `georef_panel_id: ${panel.georef_panel_id}`,
         `panel_type: ${panel.panel_type}`,
         `route_count: ${panel.route_count}`,
+        `fit_mode: ${view.fitMode || 'all'}`,
+        `zoom: ${(view.zoom * 100).toFixed(0)}%`,
         `reference_feature_count: ${stats.featureCount}`,
         `reference_bbox: ${stats.bbox ? `${stats.bbox.x0.toFixed(2)}, ${stats.bbox.y0.toFixed(2)}, ${stats.bbox.x1.toFixed(2)}, ${stats.bbox.y1.toFixed(2)}` : '-'}`,
         `pdf_panel_bbox: ${panel.pdf_bbox.x0.toFixed(2)}, ${panel.pdf_bbox.y0.toFixed(2)}, ${panel.pdf_bbox.x1.toFixed(2)}, ${panel.pdf_bbox.y1.toFixed(2)}`,
@@ -926,6 +1077,7 @@ def build_html(config: dict[str, Any]) -> str:
         <span><strong>vertex</strong>: ${summary.vertexCount}</span>
         <span><strong>panel km</strong>: ${summary.lengthKm.toFixed(2)}</span>
         <span><strong>current km</strong>: ${currentLength.toFixed(2)}</span>
+        <span><strong>temples</strong>: ${templePoints(panel).length}</span>
       `;
       ui.notice.textContent = outputDirHandle
         ? 'autosave: output dir に書き込みます'
@@ -1045,15 +1197,48 @@ def build_html(config: dict[str, Any]) -> str:
       return { type: 'FeatureCollection', features };
     }
 
+    function buildTempleGeojsonForMap(panel) {
+      return {
+        type: 'FeatureCollection',
+        features: templePoints(panel).map((point) => ({
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [Number(point.longitude), Number(point.latitude)],
+          },
+          properties: {
+            gcp_id: point.gcp_id || '',
+            temple_group: point.temple_group || '',
+            temple_no: point.temple_no || '',
+            temple_no_label: point.temple_no_label || '',
+            name_full: point.name_full || '',
+            name_short: point.name_short || '',
+            source_name_text: point.source_name_text || '',
+            confidence: point.confidence ?? '',
+            source_kind: point.source_kind || '',
+            review_reasons: point.review_reasons || '',
+          },
+        })),
+      };
+    }
+
+    function setLayerVisibility(layerIds, visible) {
+      layerIds.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+      });
+    }
+
     function updateMapSources() {
       if (!mapReady) return;
       const panel = panelById(currentPanelId);
       ensureMapSource('manual-routes', buildManualRoutesSourceData(currentPanelId));
       ensureMapSource('active-route', lineFeatureForActiveRoute(activeRoute()));
       ensureMapSource('reference-routes', buildReferenceGeojsonForMap(panel));
-      if (map.getLayer('reference-routes-line')) {
-        map.setLayoutProperty('reference-routes-line', 'visibility', referenceVisible ? 'visible' : 'none');
-      }
+      ensureMapSource('temple-points', buildTempleGeojsonForMap(panel));
+      setLayerVisibility(['reference-routes-line'], referenceVisible);
+      setLayerVisibility(['temple-circle', 'temple-number', 'temple-label'], templeVisible);
     }
 
     function clearVertexMarkers() {
@@ -1106,8 +1291,35 @@ def build_html(config: dict[str, Any]) -> str:
       });
     }
 
+    function fitMapToPointRows(rows, zoomForSingle = 14.5) {
+      if (!rows.length) return false;
+      if (rows.length === 1) {
+        map.easeTo({
+          center: [Number(rows[0].longitude), Number(rows[0].latitude)],
+          zoom: zoomForSingle,
+          duration: 0,
+        });
+        return true;
+      }
+      const bounds = new mapboxgl.LngLatBounds();
+      rows.forEach((row) => bounds.extend([Number(row.longitude), Number(row.latitude)]));
+      map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 15.8 });
+      return true;
+    }
+
+    function rememberCurrentMapView() {
+      if (!mapReady) return;
+      const center = map.getCenter();
+      state.lastMapView = {
+        center: [Number(center.lng.toFixed(7)), Number(center.lat.toFixed(7))],
+        zoom: Number(map.getZoom().toFixed(3)),
+      };
+      localStorage.setItem(config.local_storage_key, JSON.stringify(buildAutosavePayload()));
+    }
+
     function fitMapToPanel(panel) {
       if (!mapReady) return;
+      if (!panel) return;
       const routeFeatures = buildManualRoutesSourceData(panel.georef_panel_id).features;
       if (routeFeatures.length) {
         const bounds = new mapboxgl.LngLatBounds();
@@ -1119,6 +1331,13 @@ def build_html(config: dict[str, Any]) -> str:
         const bounds = new mapboxgl.LngLatBounds();
         ['top_left', 'top_right', 'bottom_right', 'bottom_left'].forEach((key) => bounds.extend(panel.saved_corners[key]));
         map.fitBounds(bounds, { padding: 50, duration: 0, maxZoom: 16.5 });
+        return;
+      }
+      if (fitMapToPointRows(manualGeoPoints(panel), 14.8)) return;
+      if (fitMapToPointRows(autoGeoPoints(panel), 14.4)) return;
+      if (fitMapToPointRows(templePoints(panel), 14.2)) return;
+      if (state.lastMapView?.center?.length === 2) {
+        map.jumpTo({ center: state.lastMapView.center, zoom: state.lastMapView.zoom || 12 });
         return;
       }
       map.jumpTo({ center: panel.initial_center || config.initial_map_center || DEFAULT_CENTER, zoom: panel.initial_zoom || config.initial_map_zoom || DEFAULT_ZOOM });
@@ -1145,6 +1364,9 @@ def build_html(config: dict[str, Any]) -> str:
     }
 
     function onMapClick(event) {
+      if (map.queryRenderedFeatures(event.point, { layers: ['temple-circle', 'temple-number', 'temple-label'] }).length) {
+        return;
+      }
       const panel = panelById(currentPanelId);
       const coord = [Number(event.lngLat.lng.toFixed(7)), Number(event.lngLat.lat.toFixed(7))];
       let route = activeRoute();
@@ -1172,6 +1394,22 @@ def build_html(config: dict[str, Any]) -> str:
       if (!feature) return;
       setActiveRouteId(currentPanelId, feature.properties.route_id);
       renderAll();
+    }
+
+    function onTempleClick(event) {
+      const feature = event.features?.[0];
+      if (!feature) return;
+      const props = feature.properties || {};
+      const coordinates = feature.geometry?.coordinates || [0, 0];
+      new mapboxgl.Popup({ closeButton: true, offset: 14 })
+        .setLngLat(coordinates)
+        .setHTML(
+          `<strong>${props.temple_no_label || '-'} ${props.name_short || ''}</strong><br>` +
+          `${props.name_full || ''}<br>` +
+          `group=${props.temple_group || '-'} / source=${props.source_kind || '-'}<br>` +
+          `lon=${Number(coordinates[0]).toFixed(6)}, lat=${Number(coordinates[1]).toFixed(6)}`
+        )
+        .addTo(map);
     }
 
     function updateRouteList() {
@@ -1209,6 +1447,7 @@ def build_html(config: dict[str, Any]) -> str:
         `panel_length_km: ${(summary.lengthKm).toFixed(3)}`,
         `active_route: ${route ? route.route_id : '-'}`,
         `reference_on_map: ${referenceVisible}`,
+        `temple_markers: ${templeVisible} (${templePoints(panel).length})`,
       ].join('\\n');
     }
 
@@ -1338,6 +1577,9 @@ def build_html(config: dict[str, Any]) -> str:
         state.panels = preferred.panels;
         state.activeRouteIdByPanel = preferred.active_route_id_by_panel || {};
       }
+      if (preferred?.last_map_view?.center?.length === 2) {
+        state.lastMapView = preferred.last_map_view;
+      }
       if (routesPayload?.features?.length && !preferred?.panels) {
         routesPayload.features.forEach((feature) => {
           const props = feature.properties || {};
@@ -1360,7 +1602,9 @@ def build_html(config: dict[str, Any]) -> str:
     function onPanelChange() {
       currentPanelId = ui.panelSelect.value;
       const panel = panelById(currentPanelId);
-      getPanelViewState(panel).fitApplied = false;
+      const view = getPanelViewState(panel);
+      view.fitMode = 'all';
+      view.fitApplied = false;
       renderAll();
       fitMapToPanel(panel);
     }
@@ -1372,7 +1616,9 @@ def build_html(config: dict[str, Any]) -> str:
       currentPanelId = next.georef_panel_id;
       ui.panelSelect.value = currentPanelId;
       const panel = panelById(currentPanelId);
-      getPanelViewState(panel).fitApplied = false;
+      const view = getPanelViewState(panel);
+      view.fitMode = 'all';
+      view.fitApplied = false;
       renderAll();
       fitMapToPanel(panel);
     }
@@ -1407,6 +1653,13 @@ def build_html(config: dict[str, Any]) -> str:
       renderMapDebug();
     }
 
+    function setTempleVisible(nextVisible) {
+      templeVisible = nextVisible;
+      ui.toggleTempleButton.textContent = templeVisible ? 'Temple ON' : 'Temple OFF';
+      updateMapSources();
+      renderMapDebug();
+    }
+
     function initMap() {
       if (!config.mapbox_access_token) {
         ui.notice.textContent = 'MAPBOX_ACCESS_TOKEN がありません';
@@ -1425,6 +1678,7 @@ def build_html(config: dict[str, Any]) -> str:
         ensureMapSource('manual-routes', { type: 'FeatureCollection', features: [] });
         ensureMapSource('active-route', { type: 'FeatureCollection', features: [] });
         ensureMapSource('reference-routes', { type: 'FeatureCollection', features: [] });
+        ensureMapSource('temple-points', { type: 'FeatureCollection', features: [] });
         map.addLayer({
           id: 'reference-routes-line',
           type: 'line',
@@ -1434,6 +1688,48 @@ def build_html(config: dict[str, Any]) -> str:
             'line-color': '#9ca3af',
             'line-width': 2,
             'line-opacity': 0.65,
+          },
+        });
+        map.addLayer({
+          id: 'temple-circle',
+          type: 'circle',
+          source: 'temple-points',
+          paint: {
+            'circle-radius': 8,
+            'circle-color': '#1d4ed8',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
+        map.addLayer({
+          id: 'temple-number',
+          type: 'symbol',
+          source: 'temple-points',
+          layout: {
+            'text-field': ['coalesce', ['get', 'temple_no_label'], ''],
+            'text-size': 10,
+            'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+            'text-offset': [0, 0],
+          },
+          paint: {
+            'text-color': '#ffffff',
+          },
+        });
+        map.addLayer({
+          id: 'temple-label',
+          type: 'symbol',
+          source: 'temple-points',
+          layout: {
+            'text-field': ['coalesce', ['get', 'name_short'], ''],
+            'text-size': 11,
+            'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'],
+            'text-offset': [0, 1.45],
+            'text-anchor': 'top',
+          },
+          paint: {
+            'text-color': '#0f172a',
+            'text-halo-color': '#ffffff',
+            'text-halo-width': 1.2,
           },
         });
         map.addLayer({
@@ -1458,6 +1754,10 @@ def build_html(config: dict[str, Any]) -> str:
         map.on('click', onMapClick);
         map.on('dblclick', onMapDoubleClick);
         map.on('click', 'manual-routes-line', onMapRouteClick);
+        map.on('click', 'temple-circle', onTempleClick);
+        map.on('click', 'temple-number', onTempleClick);
+        map.on('click', 'temple-label', onTempleClick);
+        map.on('moveend', rememberCurrentMapView);
         fitMapToPanel(panelById(currentPanelId));
         renderAll();
       });
@@ -1472,6 +1772,7 @@ def build_html(config: dict[str, Any]) -> str:
       ui.undoButton.addEventListener('click', onUndo);
       ui.saveButton.addEventListener('click', onSave);
       ui.toggleReferenceButton.addEventListener('click', () => setReferenceVisible(!referenceVisible));
+      ui.toggleTempleButton.addEventListener('click', () => setTempleVisible(!templeVisible));
       ui.panelNotes.addEventListener('input', onNotesInput);
       ui.routeList.addEventListener('click', (event) => {
         const deleteButton = event.target.closest('[data-delete-route-id]');
@@ -1486,11 +1787,25 @@ def build_html(config: dict[str, Any]) -> str:
       });
       ui.pdfDisplaySelect.addEventListener('change', renderAll);
       ui.editModeSelect.addEventListener('change', refreshVertexMarkers);
-      ui.pdfFitButton.addEventListener('click', () => {
+      ui.pdfFitAllButton.addEventListener('click', () => {
         const panel = panelById(currentPanelId);
         const view = getPanelViewState(panel);
         const rect = ui.pdfCanvas.getBoundingClientRect();
-        fitPdfWidth(panel, rect, view);
+        applyPdfFit(panel, rect, view, 'all');
+        drawPdfPane();
+      });
+      ui.pdfFitWidthButton.addEventListener('click', () => {
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        const rect = ui.pdfCanvas.getBoundingClientRect();
+        applyPdfFit(panel, rect, view, 'width');
+        drawPdfPane();
+      });
+      ui.pdfFitHeightButton.addEventListener('click', () => {
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        const rect = ui.pdfCanvas.getBoundingClientRect();
+        applyPdfFit(panel, rect, view, 'height');
         drawPdfPane();
       });
       ui.pdfZoomInButton.addEventListener('click', () => {
@@ -1505,6 +1820,49 @@ def build_html(config: dict[str, Any]) -> str:
         view.zoom = Math.max(0.5, view.zoom / 1.12);
         drawPdfPane();
       });
+      ui.pdfCanvas.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        view.dragState = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          panX: view.panX,
+          panY: view.panY,
+        };
+        ui.pdfCanvas.classList.add('dragging');
+        ui.pdfCanvas.setPointerCapture(event.pointerId);
+      });
+      ui.pdfCanvas.addEventListener('pointermove', (event) => {
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        if (!view.dragState || view.dragState.pointerId !== event.pointerId) return;
+        view.panX = view.dragState.panX + (event.clientX - view.dragState.startX);
+        view.panY = view.dragState.panY + (event.clientY - view.dragState.startY);
+        drawPdfPane();
+      });
+      const stopPdfDrag = (event) => {
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        if (!view.dragState) return;
+        if (event.pointerId !== undefined && view.dragState.pointerId !== event.pointerId) return;
+        view.dragState = null;
+        ui.pdfCanvas.classList.remove('dragging');
+      };
+      ui.pdfCanvas.addEventListener('pointerup', stopPdfDrag);
+      ui.pdfCanvas.addEventListener('pointercancel', stopPdfDrag);
+      ui.pdfCanvas.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        const panel = panelById(currentPanelId);
+        const view = getPanelViewState(panel);
+        const rect = ui.pdfCanvas.getBoundingClientRect();
+        const pointerX = event.clientX - rect.left;
+        const pointerY = event.clientY - rect.top;
+        const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+        zoomPdfAtPoint(panel, view, rect, pointerX, pointerY, factor);
+        drawPdfPane();
+      }, { passive: false });
       window.addEventListener('keydown', (event) => {
         if (event.target && ['TEXTAREA', 'INPUT', 'SELECT'].includes(event.target.tagName)) return;
         if (event.key === 'Backspace') {
@@ -1535,6 +1893,7 @@ def build_html(config: dict[str, Any]) -> str:
       });
       window.addEventListener('resize', () => {
         const panel = panelById(currentPanelId);
+        if (!panel) return;
         getPanelViewState(panel).fitApplied = false;
         drawPdfPane();
       });
@@ -1568,6 +1927,8 @@ def main() -> None:
     parser.add_argument("--panels-geojson", type=Path)
     parser.add_argument("--accepted-main-routes", type=Path)
     parser.add_argument("--accepted-inset-routes", type=Path)
+    parser.add_argument("--gazetteer-csv", type=Path)
+    parser.add_argument("--gcp-candidates-csv", type=Path)
     parser.add_argument("--saved-georef-dir", type=Path, default=Path("data/manual_image_georef"))
     parser.add_argument("--out-dir", type=Path, default=Path("artifacts/manual_route_editor"))
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
@@ -1578,10 +1939,14 @@ def main() -> None:
 
     image_repo_dir = takram_image_dir(args.env_file)
     panel_route_dir = image_repo_dir / "artifacts" / "panel_route_detection"
+    external_step4_dir = image_repo_dir / "artifacts" / "step4"
+    local_step4_dir = args.env_file.parent / "artifacts" / "step4"
     panels_csv = args.panels_csv or (panel_route_dir / "georef_panels.csv")
     panels_geojson = args.panels_geojson or (panel_route_dir / "georef_panels.geojson")
     accepted_main_routes = args.accepted_main_routes or (panel_route_dir / "accepted_main_georef_routes.geojson")
     accepted_inset_routes = args.accepted_inset_routes or (panel_route_dir / "accepted_inset_georef_routes.geojson")
+    gazetteer_csv = args.gazetteer_csv or first_existing_path([external_step4_dir / "gazetteer.csv", local_step4_dir / "gazetteer.csv"])
+    gcp_candidates_csv = args.gcp_candidates_csv or first_existing_path([external_step4_dir / "gcp_candidates.csv", local_step4_dir / "gcp_candidates.csv"])
 
     ensure_dir(args.out_dir)
     image_dir = args.out_dir / "images"
@@ -1594,6 +1959,8 @@ def main() -> None:
     ]
     panel_features = panel_geojson_by_key(panels_geojson)
     reference_routes_by_panel = route_features_by_panel([accepted_main_routes, accepted_inset_routes])
+    gcp_rows = read_optional_csv_rows(gcp_candidates_csv)
+    gcp_rows_for_panel = gcp_rows_by_panel(panels, gcp_rows)
     saved_georef = saved_georef_by_panel(args.saved_georef_dir)
     token = read_mapbox_token(args.env_file)
 
@@ -1636,6 +2003,7 @@ def main() -> None:
             panel_area_pt2 = bbox_area_pt2(panel_bbox)
             panel_feature = panel_features.get(key)
             reference_features = reference_routes_by_panel.get(key, [])
+            panel_gcp_rows = gcp_rows_for_panel.get(key, [])
             manifest_panels.append(
                 {
                     "page_no": page_no,
@@ -1656,6 +2024,8 @@ def main() -> None:
                     "saved_corners": saved_corners,
                     "saved_georef_path": str(saved_row.get("__path__", "")) if saved_row else "",
                     "manual_geo_points": serializable_manual_geo_points(saved_row),
+                    "auto_geo_points": serializable_auto_geo_points(panel_gcp_rows),
+                    "temple_points": serializable_temple_points(panel_gcp_rows),
                     "panel_area_pt2": round(panel_area_pt2, 3),
                 }
             )
@@ -1673,6 +2043,8 @@ def main() -> None:
         "panels": manifest_panels,
         "editor_version": EDITOR_VERSION,
         "local_storage_key": "manual-route-editor-autosave",
+        "gazetteer_csv": str(gazetteer_csv) if gazetteer_csv else "",
+        "gcp_candidates_csv": str(gcp_candidates_csv) if gcp_candidates_csv else "",
     }
 
     (args.out_dir / "panel_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1689,9 +2061,10 @@ def main() -> None:
                 "## 使い方",
                 "",
                 "1. `python -m http.server 8131 -d artifacts/manual_route_editor` で配信します。",
-                "2. `Bind Output Dir` で `artifacts/manual_route_editor` を選ぶと、`manual_routes.geojson` と `autosave.json` に直接書き込みます。",
-                "3. 右 Mapbox をクリックして頂点を追加し、ダブルクリックで現在の LineString を確定します。",
-                "4. `S` で保存、`Z` で Undo、`N/P` で panel 移動します。",
+                "2. 最初に `Bind Output Dir` で `artifacts/manual_route_editor` を選びます。",
+                "3. 左は PDF 参照、右は Mapbox 手打ちです。寺マーカーを目印にします。",
+                "4. 右 Mapbox をクリックして頂点を追加し、ダブルクリックで現在の LineString を確定します。",
+                "5. `S` で保存、`Z` で Undo、`N/P` で panel 移動します。",
                 "",
                 "Accepted routes reference は参考表示であり、最終採用しません。",
             ]

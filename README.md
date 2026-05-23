@@ -212,8 +212,13 @@ Step 8: Mapbox表示確認
 ### 使い方
 
 - `python -m http.server 8131 -d artifacts/manual_route_editor` で配信する。
+- 最初に `Bind Output Dir` を押して `artifacts/manual_route_editor` を選ぶ。
 - 左ペインは georef panel の PDF crop 参照用。
-- 右ペインは Mapbox 手打ち用。
+- 右ペインは Mapbox 手打ち用。PDF は左の参考で、最終ルートは右の Mapbox 上で描く。
+- `Temple ON` の寺マーカーを目印にする。
+- `Reference` route は壊れている可能性があるため、最終採用しない。
+- `Save` で `manual_routes.geojson` に保存する。
+- 右ペインの基本操作:
   - `click`: 点追加
   - `Shift + click`: 新しい LineString 開始
   - `double click`: 現在の LineString 確定
